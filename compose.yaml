@@ -1,0 +1,31 @@
+# Local development: the API rebuilds on change; front-end edits show up on browser refresh.
+#   docker compose up --build
+#   web: http://localhost:3000   api: http://localhost:8080/api/health
+name: lilanaya
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: src/app/api/Dockerfile
+      target: dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-target:/target
+
+  web:
+    build:
+      context: src/app/web/lilanaya-client
+    ports:
+      - "3000:80"
+    volumes:
+      - ./src/app/web/lilanaya-client/public:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+
+volumes:
+  cargo-registry:
+  cargo-target:

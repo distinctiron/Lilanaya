@@ -61,7 +61,7 @@ Domain modules (Application Programming Interface Gateway)
 - billing: subscriptions, packs, quota and rollover accounting.
 
 Queues and workers
-- Queue: Redis (BullMQ) or RabbitMQ.
+- Queue: Redis or a Postgres-backed job table.
 - Job envelope: { run_id, world_ref, actor_refs, iterations, policy, seed, options }.
 - Worker scaling: horizontal autoscale based on queue depth and Service Level Objective.
 

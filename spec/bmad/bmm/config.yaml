@@ -3,7 +3,7 @@
 # Version: 6.0.0-alpha.7
 # Date: 2025-11-09T19:18:27.409Z
 
-project_name: lilanyaya
+project_name: lilanaya
 include_game_planning: false
 user_skill_level: intermediate
 tech_docs: '{project-root}/docs'

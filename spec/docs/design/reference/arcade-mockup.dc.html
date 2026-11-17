@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lilanaya results, Arcade direction</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#A6A6A6}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="min-height: 1000px; box-sizing: border-box; background: #000000; color: #FFFFFF; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding: 10px 32px; border-bottom: 6px dashed #FFFFFF">
+<div style="font-family: 'Press Start 2P', monospace; font-size: 18px">LILANAYA</div>
+<nav style="display: flex; flex-wrap: wrap; gap: 6px; flex-grow: 1; font-family: 'Press Start 2P', monospace; font-size: 11px">
+<a href="#" style="padding: 17px 12px; text-decoration: none; background: #FFFFFF; color: #000000">WORLDS</a>
+<a href="#" style="padding: 17px 12px; text-decoration: none">STRATEGIES</a>
+<a href="#" style="padding: 17px 12px; text-decoration: none">RUNS</a>
+</nav>
+<button onClick="{{replay}}" style="min-height: 44px; padding: 0 14px; background: #000000; color: #FFFFFF; border: 4px solid #FFFFFF; font: 11px 'Press Start 2P', monospace; cursor: pointer">REPLAY</button>
+<button style="min-height: 44px; padding: 0 14px; background: #FFFFFF; color: #000000; border: 4px solid #FFFFFF; font: 11px 'Press Start 2P', monospace; cursor: pointer">NEW STRATEGY</button>
+</header>
+<main style="max-width: 1100px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 40px">
+<section style="display: flex; flex-direction: column; gap: 24px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: #A6A6A6">
+<div>REPEATED PRISONER'S DILEMMA · SEED 42 · SAMPLE DATA</div>
+<div>ROUND {{round}} / 40 SHOWN OF 200</div>
+</div>
+<div style="display: flex; align-items: stretch">
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 16px; padding-right: 32px">
+<div style="font-family: 'Press Start 2P', monospace; font-size: 13px">GRUDGER</div>
+<div style="font-family: 'Press Start 2P', monospace; font-size: clamp(36px, 8vw, 88px); line-height: 1">{{scoreA}}</div>
+</div>
+<div aria-hidden="true" style="width: 0; border-left: 8px dashed #FFFFFF"></div>
+<div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding-left: 32px">
+<div style="font-family: 'Press Start 2P', monospace; font-size: 13px">RANDOM</div>
+<div style="font-family: 'Press Start 2P', monospace; font-size: clamp(36px, 8vw, 88px); line-height: 1">{{scoreB}}</div>
+</div>
+</div>
+<div style="overflow-x: auto">
+<div style="min-width: 720px; display: grid; grid-template-columns: repeat(40, minmax(0, 1fr)); gap: 5px">
+<sc-for list="{{cols}}" as="c" hint-placeholder-count="40">
+<div style="display: flex; flex-direction: column; gap: 5px">
+<div style="aspect-ratio: 1; box-sizing: border-box; background: {{c.aBg}}; border: 3px solid {{c.aBd}}"></div>
+<div style="aspect-ratio: 1; box-sizing: border-box; background: {{c.bBg}}; border: 3px solid {{c.bBd}}"></div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px 28px; color: #A6A6A6">
+<div>TOP ROW GRUDGER · BOTTOM ROW RANDOM</div>
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 14px; height: 14px; background: #FFFFFF; display: inline-block"></span>COOPERATE</div>
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 14px; height: 14px; box-sizing: border-box; border: 3px solid #FFFFFF; display: inline-block"></span>DEFECT</div>
+</div>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start">
+<section style="flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0 0 6px; font-family: 'Press Start 2P', monospace; font-size: 13px; font-weight: 400">HIGH SCORES</h2>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div style="display: flex; align-items: center; gap: 14px">
+<div style="width: 18px; font-family: 'Press Start 2P', monospace; font-size: 12px">{{r.rank}}</div>
+<div style="width: 124px">{{r.name}}</div>
+<div style="flex-grow: 1; height: 20px">
+<div style="height: 20px; box-sizing: border-box; width: {{r.pct}}; background: {{r.bg}}; border: 3px solid #FFFFFF"></div>
+</div>
+<div style="width: 52px; text-align: right; font-family: 'Press Start 2P', monospace; font-size: 12px">{{r.score}}</div>
+</div>
+</sc-for>
+<div style="color: #A6A6A6">SOLID BAR NEVER DEFECTS FIRST · HOLLOW BAR DEFECTS FIRST</div>
+</section>
+<section style="flex: 1 1 400px; min-width: 0">
+<h2 style="margin: 0 0 20px; font-family: 'Press Start 2P', monospace; font-size: 13px; font-weight: 400">HEAD TO HEAD</h2>
+<div style="overflow-x: auto">
+<div style="min-width: 380px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px">
+<sc-for list="{{cells}}" as="c" hint-placeholder-count="36">
+<div style="height: 44px; display: flex; align-items: center; justify-content: center; background: {{c.bg}}; color: {{c.fg}}; font-weight: 600">{{c.txt}}</div>
+</sc-for>
+</div>
+</div>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1000}}'>
+class Component extends DCLogic {
+match() {
+if (this._M) return this._M;
+var x = 42, grudge = false, a = 0, b = 0, M = [];
+for (var i = 0; i < 40; i++) {
+x = (x * 1664525 + 1013904223) >>> 0;
+var rc = x / 4294967296 < 0.5;
+var gc = !grudge;
+a += gc ? (rc ? 3 : 0) : (rc ? 5 : 1);
+b += rc ? (gc ? 3 : 0) : (gc ? 5 : 1);
+if (!rc) grudge = true;
+M.push({ gc: gc, rc: rc, a: a, b: b });
+}
+this._M = M;
+return M;
+}
+componentDidMount() {
+var rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (rm) { this.n = 60; this.setState({ n: 60 }); return; }
+this.start();
+}
+componentWillUnmount() { clearTimeout(this.t); }
+start() {
+clearTimeout(this.t);
+this.n = 0;
+this.setState({ n: 0 });
+this.tick();
+}
+tick() {
+var self = this;
+if (this.n >= 60) return;
+this.n++;
+this.setState({ n: this.n });
+this.t = setTimeout(function () { self.tick(); }, this.n < 40 ? 70 : 30);
+}
+renderVals() {
+var self = this;
+var M = this.match();
+var n = (this.state || {}).n || 0;
+var shown = Math.min(n, 40);
+var g = Math.max(0, Math.min(1, (n - 40) / 20));
+function sq(played, coop) {
+if (!played) return { bg: 'transparent', bd: '#2E2E2E' };
+return { bg: coop ? '#FFFFFF' : 'transparent', bd: '#FFFFFF' };
+}
+var cols = M.map(function (r, i) {
+var p = i < shown, A = sq(p, r.gc), B = sq(p, r.rc);
+return { aBg: A.bg, aBd: A.bd, bBg: B.bg, bBd: B.bd };
+});
+var last = shown > 0 ? M[shown - 1] : { a: 0, b: 0 };
+var names = ['Grudger', 'Tit for Tat', 'Pavlov', 'Always Defect', 'Random'];
+var short = ['GRU', 'TFT', 'PAV', 'ALLD', 'RND'];
+var nice = [true, true, true, false, false];
+var m = [[3, 3, 3, 1, 3], [3, 3, 3, 1, 2.25], [3, 3, 3, 0.5, 2.25], [1.02, 1.02, 3, 1, 3], [0.5, 2.25, 2.25, 0.5, 2.25]];
+var rows = m.map(function (row, i) {
+var mean = row.reduce(function (p, q) { return p + q; }, 0) / row.length;
+return { rank: i + 1, name: names[i], score: mean.toFixed(2), pct: Math.max(2, mean / 3 * 100 * g).toFixed(0) + '%', bg: nice[i] ? '#FFFFFF' : 'transparent' };
+});
+var cells = [{ txt: '', bg: 'transparent', fg: '#A6A6A6' }];
+short.forEach(function (s) { cells.push({ txt: s, bg: 'transparent', fg: '#A6A6A6' }); });
+m.forEach(function (row, i) {
+cells.push({ txt: short[i], bg: 'transparent', fg: '#A6A6A6' });
+row.forEach(function (v) {
+var k = Math.round(30 + (v - 0.5) / 2.5 * 225);
+cells.push({ txt: v.toFixed(2), bg: 'rgb(' + k + ',' + k + ',' + k + ')', fg: k > 140 ? '#000000' : '#FFFFFF' });
+});
+});
+return { cols: cols, round: shown, scoreA: last.a, scoreB: last.b, rows: rows, cells: cells, replay: function () { self.start(); } };
+}
+}
+</script>
+</body>
+</html>

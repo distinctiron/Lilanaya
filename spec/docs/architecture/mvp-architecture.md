@@ -31,7 +31,7 @@ High‑level components
   - Batch scheduler (N rounds × pairings)
   - Aggregation: per‑actor scores, pairwise matrices, Key Performance Indicator snapshots
   - Outputs: run artifacts (summaries, traces if enabled)
-  - Queue: Redis/RabbitMQ (BullMQ/Celery)
+  - Queue: Redis or a Postgres-backed job table
 - Analytics/Explainability
   - Pairwise tables, outcome distributions, pivotal‑event detection
   - Replay sampling (seeded) with event markers
@@ -112,9 +112,9 @@ Scalability & cost
 Deployment
 - Containerized services (Docker)
 - Minimal stack:
-  - Web: Next.js
-  - Application Programming Interface: Node/TypeScript (NestJS/Fastify) or Python (FastAPI)
-  - Workers: Node or Python (same language as the Application Programming Interface to share models)
+  - Web: vanilla JavaScript (static files served by nginx, no build step)
+  - Application Programming Interface: Rust (axum on tokio)
+  - Workers: Rust (same Cargo workspace as the Application Programming Interface to share models and the engine crate)
   - Database: Postgres
   - Queue: Redis
   - Object store: Amazon Simple Storage Service compatible

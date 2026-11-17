@@ -1,0 +1,21 @@
+# Production-like images: release binary + nginx serving the static front end.
+#   docker compose -f compose.prod.yaml up --build
+#   app: http://localhost:3000   (nginx proxies /api to the backend)
+name: lilanaya-prod
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: src/app/api/Dockerfile
+      target: runtime
+    restart: unless-stopped
+
+  web:
+    build:
+      context: src/app/web/lilanaya-client
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    restart: unless-stopped

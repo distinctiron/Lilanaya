@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD) — lilanyaya
+# Product Requirements Document (PRD) — lilanaya
 
 Status: Draft  
 Owner: Sujeevan (Product)  

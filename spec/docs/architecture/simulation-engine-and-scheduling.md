@@ -85,7 +85,7 @@ Worker implementation
   - Input envelope: { run_id, world_ref, strategy_refs[], policy, iterations, seed, options }
   - Output: artifacts persisted to object storage, run status updated in database.
 - Language
-  - Same language as the Application Programming Interface to share models (for example, TypeScript or Python).
+  - Rust, in the same Cargo workspace as the Application Programming Interface, so models and the engine crate are shared.
 - Parallelization
   - Outer loop over pairings: chunked into batches (configurable batch size).
   - Inner loop (rounds): tight numeric loop; avoid allocations; reuse buffers.
