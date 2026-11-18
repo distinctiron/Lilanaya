@@ -1,14 +1,74 @@
-# Production-like images: release binary + nginx serving the static front end.
+# Production-like images: release binary + nginx serving the static front end + Postgres.
 #   docker compose -f compose.prod.yaml up --build
 #   app: http://localhost:3000   (nginx proxies /api to the backend)
+# Set POSTGRES_PASSWORD in the environment (or a .env file) for anything beyond a local try-out.
+# Sign-in needs PUBLIC_URL (where browsers reach the site) and SMTP_URL (a real mail server);
+# without SMTP_URL the sign-in links are only printed to the API log. See .env.example.
 name: lilanaya-prod
 
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lilanaya
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lilanaya}
+      POSTGRES_DB: lilanaya
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lilanaya -d lilanaya"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # S3-compatible object storage for run artifacts (Versity S3 Gateway over a local folder;
+  # each top-level folder is a bucket). In real deployments point the S3_* settings at any S3 service.
+  s3:
+    image: versity/versitygw:v1.11.0
+    entrypoint: ["sh", "-c", "mkdir -p /data/lilanaya-artifacts && exec versitygw --port :9000 posix /data"]
+    environment:
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-lilanaya}
+      ROOT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-lilanaya-secret}
+    ports:
+      - "9000:9000" # browsers follow signed download links to this port
+    volumes:
+      - s3data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9000"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: src/app/api/Dockerfile
       target: runtime
+    environment:
+      DATABASE_URL: postgres://lilanaya:${POSTGRES_PASSWORD:-lilanaya}@db:5432/lilanaya
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      S3_BUCKET: lilanaya-artifacts
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-lilanaya}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-lilanaya-secret}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-Lilanaya <no-reply@lilanaya.local>}
+      # Plain-English strategy compile. Leave both keys unset to switch it off.
+      # Dev/test: a Claude API key. Production: Claude in Microsoft Foundry (Azure).
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_FOUNDRY_API_KEY: ${ANTHROPIC_FOUNDRY_API_KEY:-}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${ANTHROPIC_FOUNDRY_RESOURCE:-}
+      ANTHROPIC_FOUNDRY_BASE_URL: ${ANTHROPIC_FOUNDRY_BASE_URL:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -19,3 +79,7 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  pgdata:
+  s3data:

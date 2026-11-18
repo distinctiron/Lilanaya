@@ -8,12 +8,14 @@ FROM base AS dev
 RUN cargo install cargo-watch --locked
 ENV CARGO_TARGET_DIR=/target
 EXPOSE 8080
-CMD ["cargo", "watch", "-w", "Cargo.toml", "-w", "src", "-x", "run -p lilanaya-api"]
+# Watch only the Rust crates: front-end edits must not restart the API (runs are held in memory).
+CMD ["cargo", "watch", "-w", "Cargo.toml", "-w", "src/app/api", "-w", "src/engine", "-x", "run -p lilanaya-api"]
 
 # --- build: release binary ---
 FROM base AS build
 COPY Cargo.toml Cargo.lock ./
 COPY src/app/api src/app/api
+COPY src/engine src/engine
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --release --locked -p lilanaya-api \
@@ -21,6 +23,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # --- runtime ---
 FROM debian:trixie-slim AS runtime
+# Root certificates: the object-storage client needs them to build its HTTPS client (and to reach a real S3).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/lilanaya-api /usr/local/bin/lilanaya-api
 USER nobody
 EXPOSE 8080

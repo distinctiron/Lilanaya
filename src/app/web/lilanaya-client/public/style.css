@@ -1,16 +1,814 @@
+/* Lilanaya — the "Arcade" direction. Source of truth: spec/docs/design/visual-direction.md.
+   Black field, white blocks, pixel display type, dashed dividers. No colour, gradients,
+   shadows or rounded corners: meaning is carried by solid versus hollow and by greys. */
+
+@font-face {
+	font-family: 'Press Start 2P';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/press-start-2p-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'IBM Plex Mono';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'IBM Plex Mono';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
+}
+
 :root {
-	color-scheme: light dark;
-	font-family: system-ui, sans-serif;
-	line-height: 1.5;
+	--bg: #000000;
+	--fg: #ffffff;
+	--muted: #a6a6a6;
+	--ghost: #2e2e2e; /* outlines of squares not yet played; never text */
+	--font-display: 'Press Start 2P', monospace;
+	--font-body: 'IBM Plex Mono', ui-monospace, monospace;
+	--gutter: 32px;
+	color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
 }
 
 body {
 	margin: 0;
+	min-height: 100vh;
+	background: var(--bg);
+	color: var(--fg);
+	font-family: var(--font-body);
+	font-size: 14px;
+	line-height: 1.5;
 }
 
+h1,
+h2,
+p,
+ul,
+dl,
+dd,
+fieldset {
+	margin: 0;
+	padding: 0;
+}
+
+fieldset {
+	border: 0;
+	min-width: 0;
+}
+
+ul {
+	list-style: none;
+}
+
+strong,
+th {
+	font-weight: 600;
+}
+
+a {
+	color: var(--muted);
+}
+
+a:hover {
+	color: var(--fg);
+}
+
+:focus-visible {
+	outline: 3px dashed var(--fg);
+	outline-offset: 3px;
+}
+
+main:focus,
+h1:focus {
+	outline: none;
+}
+
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.skip-link {
+	position: absolute;
+	left: 8px;
+	top: -100px;
+	z-index: 1;
+	padding: 14px;
+	background: var(--fg);
+	color: var(--bg);
+	font: 11px var(--font-display);
+	text-transform: uppercase;
+}
+
+.skip-link:focus {
+	top: 8px;
+}
+
+/* --- layout --- */
+
 main {
-	max-width: 48rem;
+	max-width: 1100px;
 	margin: 0 auto;
-	padding: 2rem 1rem;
+	padding: var(--gutter);
+}
+
+.stack-sm,
+.stack,
+.stack-md,
+.stack-lg {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.stack-sm {
+	gap: 8px;
+}
+
+.stack {
+	gap: 14px;
+}
+
+.stack-md {
+	gap: 24px;
+}
+
+.stack-lg {
+	gap: 40px;
+}
+
+.row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 14px;
+}
+
+.spread {
+	justify-content: space-between;
+}
+
+.columns {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	gap: 40px;
+}
+
+.columns > * {
+	flex: 1 1 400px;
+	min-width: 0;
+}
+
+.columns > .high-scores {
+	flex-basis: 480px;
+}
+
+.prose {
+	max-width: 68ch;
+}
+
+.meta {
+	color: var(--muted);
+	text-transform: uppercase;
+}
+
+.muted {
+	color: var(--muted);
+}
+
+/* Anything wider than a phone scrolls inside its own box. */
+.scroll-box {
+	overflow-x: auto;
+	max-width: 100%;
+}
+
+/* --- header --- */
+
+.site-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 28px;
+	padding: 10px var(--gutter);
+	border-bottom: 6px dashed var(--fg);
+}
+
+.logo {
+	font: 18px var(--font-display);
+	color: var(--fg);
+	text-decoration: none;
+	text-transform: uppercase;
+}
+
+.site-nav {
+	display: flex;
+	flex-wrap: wrap;
+	flex-grow: 1;
+	gap: 6px;
+	font: 11px var(--font-display);
+	text-transform: uppercase;
+}
+
+.site-nav a {
+	padding: 17px 12px; /* 11px type + 34px = 45px tall */
+	text-decoration: none;
+}
+
+.site-nav a[aria-current='page'] {
+	background: var(--fg);
+	color: var(--bg);
+}
+
+/* --- buttons --- */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 44px;
+	padding: 4px 14px;
+	background: var(--bg);
+	color: var(--fg);
+	border: 4px solid var(--fg);
+	border-radius: 0;
+	font: 11px/1.4 var(--font-display);
+	text-transform: uppercase;
+	text-decoration: none;
 	text-align: center;
+	cursor: pointer;
+}
+
+.btn:hover {
+	background: var(--fg);
+	color: var(--bg);
+}
+
+.btn-primary {
+	background: var(--fg);
+	color: var(--bg);
+}
+
+.btn-primary:hover {
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.btn:disabled {
+	background: var(--bg);
+	color: var(--muted);
+	border-color: var(--muted);
+	cursor: default;
+}
+
+/* --- headings --- */
+
+.section-heading {
+	font: 400 13px/1.5 var(--font-display);
+	text-transform: uppercase;
+}
+
+.section-heading a {
+	color: var(--fg);
+}
+
+/* --- cards and lists --- */
+
+.cards {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+}
+
+.card {
+	padding: 20px;
+	border: 3px solid var(--fg);
+}
+
+.plain-list {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.plain-list.tight {
+	gap: 6px;
+}
+
+details > summary {
+	min-height: 44px;
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	color: var(--muted);
+	text-transform: uppercase;
+}
+
+details > summary::before {
+	content: '+ ';
+	white-space: pre;
+}
+
+details[open] > summary::before {
+	content: '- ';
+}
+
+.rules {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 8px 20px;
+}
+
+/* --- plain data tables --- */
+
+table {
+	border-collapse: collapse;
+}
+
+.grid-table th,
+.grid-table td {
+	padding: 10px 14px;
+	border: 3px solid var(--fg);
+	text-align: left;
+	vertical-align: top;
+}
+
+.grid-table thead th {
+	color: var(--muted);
+	text-transform: uppercase;
+}
+
+.grid-table thead td:empty {
+	border-top-color: transparent;
+	border-left-color: transparent;
+}
+
+.grid-table caption {
+	padding-bottom: 8px;
+	text-align: left;
+}
+
+.grid-table .num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.rank,
+.score {
+	font: 12px/1.6 var(--font-display);
+}
+
+/* --- match view --- */
+
+.match {
+	display: flex;
+	align-items: stretch;
+}
+
+.match-side {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.match-left {
+	align-items: flex-end;
+	padding-right: var(--gutter);
+	text-align: right;
+}
+
+.match-right {
+	align-items: flex-start;
+	padding-left: var(--gutter);
+}
+
+.match-name {
+	font: 13px/1.5 var(--font-display);
+	text-transform: uppercase;
+	overflow-wrap: anywhere;
+}
+
+.match-score {
+	font: clamp(36px, 8vw, 88px) / 1 var(--font-display);
+	font-variant-numeric: tabular-nums;
+}
+
+.centre-line {
+	width: 0;
+	border-left: 8px dashed var(--fg);
+}
+
+/* --- round strip --- */
+
+.round-strip {
+	display: grid;
+	grid-template-columns: repeat(var(--rounds), minmax(0, 1fr));
+	gap: 5px;
+	/* Squares stay between 13px and 28px wide however many rounds are shown. */
+	min-width: min(720px, calc(var(--rounds) * 18px));
+	max-width: calc(var(--rounds) * 33px);
+}
+
+.round {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.sq {
+	aspect-ratio: 1;
+	border: 3px solid var(--ghost);
+}
+
+.sq-solid {
+	background: var(--fg);
+	border-color: var(--fg);
+}
+
+.sq-hollow {
+	border-color: var(--fg);
+}
+
+.legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 28px;
+}
+
+.legend-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.swatch {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border: 3px solid var(--fg);
+}
+
+.swatch-solid {
+	background: var(--fg);
+}
+
+/* --- high scores --- */
+
+.bars {
+	width: 100%;
+	min-width: 440px;
+	border-collapse: separate;
+	border-spacing: 0 14px;
+	margin: -14px 0;
+}
+
+.bars th,
+.bars td {
+	padding: 0 14px 0 0;
+	text-align: left;
+	font-weight: 400;
+	vertical-align: middle;
+}
+
+.bars thead th {
+	font-weight: 400;
+}
+
+.bars .rank {
+	width: 32px;
+}
+
+.bars .name {
+	width: 170px;
+}
+
+.bars .bar-cell {
+	width: auto;
+}
+
+.bars .score,
+.bars .score-head {
+	width: 66px;
+	text-align: right;
+}
+
+.bars .label,
+.bars thead th:last-child {
+	width: 120px;
+	padding-right: 0;
+	text-transform: uppercase;
+}
+
+.bar {
+	height: 20px;
+	border: 3px solid var(--fg);
+}
+
+.bar-solid {
+	background: var(--fg);
+}
+
+/* --- head to head --- */
+
+.matrix {
+	border-collapse: separate;
+	border-spacing: 5px;
+	margin: -5px;
+	width: calc(100% + 10px);
+	min-width: calc((var(--n) + 1) * 64px);
+	table-layout: fixed;
+}
+
+.matrix th,
+.matrix td {
+	height: 44px;
+	padding: 0;
+	text-align: center;
+	color: var(--muted);
+}
+
+.matrix abbr {
+	text-decoration: none;
+}
+
+.matrix .cell {
+	font-weight: 600;
+}
+
+.matrix .cell a {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 44px;
+	color: inherit;
+	text-decoration: none;
+}
+
+.matrix .cell a:hover {
+	text-decoration: underline;
+}
+
+/* The match on show: a dashed frame inside the cell, in the cell's own text colour. */
+.matrix .cell a[aria-current] {
+	outline: 3px dashed currentColor;
+	outline-offset: -6px;
+}
+
+.matrix .cell a:focus-visible {
+	outline: 3px dashed var(--fg);
+	outline-offset: 3px;
+}
+
+/* --- forms --- */
+
+.form {
+	max-width: 640px;
+}
+
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+}
+
+.field-row > .field {
+	flex: 1 1 200px;
+}
+
+.field-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 24px;
+}
+
+.field-label {
+	font: 11px/1.5 var(--font-display);
+	text-transform: uppercase;
+}
+
+legend.field-label {
+	padding: 0;
+	margin-bottom: 8px;
+}
+
+input[type='number'],
+input[type='text'],
+input[type='email'],
+textarea,
+select {
+	width: 100%;
+	min-height: 44px;
+	padding: 6px 10px;
+	background: var(--bg);
+	color: var(--fg);
+	border: 3px solid var(--fg);
+	border-radius: 0;
+	font: inherit;
+}
+
+textarea {
+	min-height: 96px;
+	line-height: 1.5;
+	resize: vertical;
+}
+
+textarea.code-input {
+	min-height: 320px;
+	white-space: pre;
+	overflow: auto;
+	tab-size: 2;
+}
+
+input[aria-invalid='true'] {
+	border-style: dashed;
+}
+
+.check {
+	display: flex;
+	align-items: flex-start;
+	gap: 14px;
+	min-height: 44px;
+	padding: 6px 0;
+	cursor: pointer;
+}
+
+.check input {
+	appearance: none;
+	flex: none;
+	width: 24px;
+	height: 24px;
+	margin: 0;
+	border: 3px solid var(--fg);
+	border-radius: 0;
+	background: var(--bg);
+	cursor: pointer;
+}
+
+/* Checked: a solid block inset in the frame. */
+.check input:checked {
+	padding: 3px;
+	background: var(--fg) content-box;
+}
+
+.error-box {
+	padding: 14px;
+	border: 3px dashed var(--fg);
+}
+
+.error-box ul {
+	margin-top: 8px;
+	padding-left: 20px;
+	list-style: square;
+}
+
+.notice {
+	padding: 14px;
+	border: 3px solid var(--muted);
+}
+
+.notice ul {
+	margin-top: 8px;
+	padding-left: 20px;
+	list-style: square;
+}
+
+/* --- profile --- */
+
+.meter {
+	max-width: 640px;
+	height: 26px;
+	border: 3px solid var(--fg);
+}
+
+.meter > div {
+	height: 100%;
+	background: var(--fg);
+}
+
+.btn-name {
+	max-width: 22ch;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	display: inline-block;
+	line-height: 30px;
+}
+
+/* --- strategies and the editor --- */
+
+.code {
+	margin: 0;
+	padding: 12px;
+	max-width: 100%;
+	max-height: 360px;
+	overflow: auto;
+	border: 3px solid var(--muted);
+	font: inherit;
+	tab-size: 2;
+}
+
+.editor {
+	max-width: 860px;
+}
+
+/* A sentence made of words and small controls: "Go to [state] when [condition]". */
+.sentence {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.sentence select,
+.sentence input {
+	width: auto;
+	max-width: 100%;
+}
+
+.sentence input[type='number'] {
+	width: 84px;
+}
+
+.sentence input[type='text'] {
+	width: 200px;
+}
+
+.moves {
+	padding-left: 14px;
+	border-left: 3px solid var(--muted);
+}
+
+.move {
+	padding: 12px 0;
+	border-top: 3px dashed var(--muted);
+}
+
+.move:first-child {
+	border-top: 0;
+	padding-top: 0;
+}
+
+.mode-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: 24px;
+	max-width: 860px;
+}
+
+/* --- phone width --- */
+
+@media (max-width: 720px) {
+	:root {
+		--gutter: 16px;
+	}
+
+	.match-left {
+		padding-right: 12px;
+	}
+
+	.match-right {
+		padding-left: 12px;
+	}
+
+	.match-name {
+		font-size: 11px;
+	}
+
+	.centre-line {
+		border-left-width: 6px;
+	}
+
+	.card {
+		padding: 14px;
+	}
+
+	.rules {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 2px;
+	}
+
+	.rules dd {
+		margin-bottom: 10px;
+	}
 }

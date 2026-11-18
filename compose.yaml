@@ -1,20 +1,83 @@
 # Local development: the API rebuilds on change; front-end edits show up on browser refresh.
 #   docker compose up --build
-#   web: http://localhost:3000   api: http://localhost:8080/api/health
+#   web: http://localhost:3000   api: http://localhost:8080/api/health   sign-in emails: http://localhost:8025
+# Secrets (for example ANTHROPIC_API_KEY) go in a .env file next to this one; it is git-ignored. See .env.example.
 name: lilanaya
 
 services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lilanaya
+      POSTGRES_PASSWORD: lilanaya # local development only
+      POSTGRES_DB: lilanaya
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lilanaya -d lilanaya"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # S3-compatible object storage for run artifacts (Versity S3 Gateway over a local folder;
+  # each top-level folder is a bucket). In real deployments point the S3_* settings at any S3 service.
+  s3:
+    image: versity/versitygw:v1.11.0
+    entrypoint: ["sh", "-c", "mkdir -p /data/lilanaya-artifacts && exec versitygw --port :9000 posix /data"]
+    environment:
+      ROOT_ACCESS_KEY: lilanaya
+      ROOT_SECRET_KEY: lilanaya-secret # local development only
+    ports:
+      - "9000:9000" # browsers follow signed download links to this port
+    volumes:
+      - s3data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9000"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Catches every email the API sends (sign-in links) and shows it at http://localhost:8025. Nothing leaves the machine.
+  mail:
+    image: axllent/mailpit:v1.34.0
+    ports:
+      - "8025:8025"
+
   api:
     build:
       context: .
       dockerfile: src/app/api/Dockerfile
       target: dev
+    environment:
+      DATABASE_URL: postgres://lilanaya:lilanaya@db:5432/lilanaya
+      S3_ENDPOINT: http://s3:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_BUCKET: lilanaya-artifacts
+      S3_ACCESS_KEY_ID: lilanaya
+      S3_SECRET_ACCESS_KEY: lilanaya-secret
+      PUBLIC_URL: http://localhost:3000
+      SMTP_URL: smtp://mail:1025
+      # Plain-English strategy compile. Leave both keys unset to switch it off.
+      # Dev/test: a Claude API key. Production: Claude in Microsoft Foundry (Azure).
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_FOUNDRY_API_KEY: ${ANTHROPIC_FOUNDRY_API_KEY:-}
+      ANTHROPIC_FOUNDRY_RESOURCE: ${ANTHROPIC_FOUNDRY_RESOURCE:-}
+      ANTHROPIC_FOUNDRY_BASE_URL: ${ANTHROPIC_FOUNDRY_BASE_URL:-}
     ports:
       - "8080:8080"
     volumes:
       - .:/app
       - cargo-registry:/usr/local/cargo/registry
       - cargo-target:/target
+    depends_on:
+      db:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+      mail:
+        condition: service_started
 
   web:
     build:
@@ -29,3 +92,5 @@ services:
 volumes:
   cargo-registry:
   cargo-target:
+  pgdata:
+  s3data:

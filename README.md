@@ -30,6 +30,10 @@ Initial target world: Prisoner’s Dilemma (repeated). The system is world‑agn
 
 - Back end: Rust (axum on tokio), one Cargo workspace rooted at the repository root.
 - Front end: vanilla JavaScript (native ES modules, no framework or build step), served by nginx.
+- Storage: Postgres (worlds, strategies, runs, traces, KPI snapshots; the `runs` table doubles as the job queue) and S3-compatible object storage for run artifacts (Versity S3 Gateway locally; any S3 service via the `S3_*` settings).
+- Accounts: sign-in by emailed one-time link, session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
+- Code strategies: JavaScript, run in an embedded QuickJS interpreter with a memory cap and a step budget, no clock, no randomness, no I/O.
+- Plain-English strategy compile: Claude, through the Claude API (development) or Claude in Microsoft Foundry on Azure (production).
 - Everything runs in containers; no local Rust toolchain is required.
 
 ## Running locally
@@ -41,23 +45,54 @@ Requires Docker with Compose.
 docker compose up --build
 # web  http://localhost:3000
 # api  http://localhost:8080/api/health
+# mail http://localhost:8025   (every email the app sends, including sign-in links, is caught here)
 
 # Production-like: release binary + front end baked into the nginx image
 docker compose -f compose.prod.yaml up --build
 # app  http://localhost:3000
 ```
 
-The first development run creates `Cargo.lock`; commit it. The production build requires it.
+Both stacks include Postgres and an S3-compatible store on http://localhost:9000 (signed download links point there); data lives in Docker volumes (`docker compose down -v` wipes them). The production build needs an up-to-date `Cargo.lock`.
 
-API tests:
+Settings that are secret or differ per deployment go in a `.env` file next to the compose files (git-ignored; start from `.env.example`):
+
+- Plain-English compile is off until a key is set: `ANTHROPIC_API_KEY` for the Claude API, or `ANTHROPIC_FOUNDRY_API_KEY` with `ANTHROPIC_FOUNDRY_RESOURCE` (or `ANTHROPIC_FOUNDRY_BASE_URL`) for Azure. `LLM_MODEL` picks the model (on Azure, the deployment name); `LLM_PROVIDER` chooses when both are set.
+- The production-like stack needs `PUBLIC_URL` and `SMTP_URL` for sign-in emails. Without `SMTP_URL` the links are only printed to the API log.
+- A user's plan (`free` or `subscriber`) is a column in `users`; there is no billing yet, so change it with SQL.
+
+Tests (engine and API; the API tests use the compose Postgres and object store, one throwaway schema and key prefix per test):
 
 ```bash
 docker compose run --rm api cargo test
 ```
 
+## API
+
+All routes are under `/api` and return JSON. Errors look like `{"error": {"code", "message", "details"?}}`.
+
+| Route | What it does |
+|---|---|
+| `GET /api/worlds`, `GET /api/worlds/{id}` | World templates |
+| `POST /api/worlds/validate` | Checks a world document: `{"valid", "errors": [{path, message}]}` |
+| `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/sign-out` | Email a one-time sign-in link; trade its token for a session cookie; end the session |
+| `GET /api/session` | `{"user": …}` for the signed-in user, `{"user": null}` otherwise |
+| `GET /api/me`, `PATCH /api/me`, `GET /api/me/entitlements`, `GET /api/usage` | Profile, display name, plan flags, runs used this month (401 when signed out) |
+| `GET /api/strategies`, `GET /api/strategies/{id}` | Built-in, public and own strategies: rules (state machines as data) or code |
+| `POST /api/strategies`, `PUT` / `DELETE /api/strategies/{id}` | Create, replace, delete own strategies (signed in). `mode` is `rules` or `code` and cannot change |
+| `POST /api/strategies/preview` | Checks a draft and plays two sample matches: `{valid, errors, warnings, samples}` (signed in; no quota) |
+| `POST /api/strategies/compile` | Plain English to rules through the language model (signed in; limited per hour) |
+| `POST /api/runs` | Queues a run (202; signed in). Body: `world_id`, optional `actors`, `iterations`, `seed`, `policy`, `schedule_mode` |
+| `GET /api/runs`, `GET /api/runs/{id}` | Run list; one run with status and, once completed, its results. Private runs answer 404 to everyone but their owner |
+| `GET /api/runs/{id}/matches/{a}/{b}` | Round-by-round moves of one pairing |
+| `GET /api/runs/{id}/artifacts`, `GET /api/runs/{id}/artifacts/{name}` | The run's files (manifest with sizes and SHA-256); the second redirects to a short-lived signed URL |
+| `GET /api/worlds/{id}/leaderboard` | Ranking from the latest completed run |
+| `GET /api/worlds/{id}/pairwise?run_id=` | Pairwise metrics: average payoff, outcome mix, first defection, punish duration |
+| `GET /api/worlds/{id}/kpis?limit=&run_id=` | KPI snapshots per run, oldest first, with change from the run before |
+
 ## Repository structure
 
-- `src/app/api` — Rust API service
+- `src/engine` — Rust simulation engine (pure, deterministic, no I/O)
+- `src/app/api` — Rust API service, Postgres store and run worker
 - `src/app/web/lilanaya-client` — vanilla JS front end (`public/` is served as-is)
 - `compose.yaml`, `compose.prod.yaml` — container setup (development / production-like)
 - `spec/docs` — Technical specifications (PRD, architecture, design, stories)
