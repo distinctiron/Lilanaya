@@ -140,7 +140,7 @@ pub struct MatchTrace {
     pub moves: Vec<[u8; 2]>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RunOutput {
     pub result: RunResult,
     /// Same order as `result.matches`.

@@ -6,3 +6,6 @@
 
 # Stand-in voice clips for local testing (macOS system voice; not for release)
 src/app/web/lilanaya-client/public/audio/voice/
+
+# The security audit lists weaknesses that are still open: kept out of the (public) repository.
+spec/docs/security-audit.md

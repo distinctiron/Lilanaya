@@ -1,143 +1,47 @@
-//! Run artifacts in S3-compatible object storage.
-//!
-//! Each completed run writes, under `runs/{run_id}/`:
+//! A run's files, built on request from what the database holds:
 //! `run_summary.json`, `pairwise_matrix.json`, `traces/{a}__{b}.json` (one per
 //! pairing) and `manifest.json`, which lists the others with size and SHA-256.
-//! Files are private; the API hands out short-lived signed URLs.
+//! Nothing is stored: the same run always gives the same bytes.
 
 use lilanaya_engine::{RunOutput, RunResult};
-use object_store::aws::{AmazonS3, AmazonS3Builder};
-use object_store::path::Path;
-use object_store::signer::Signer;
-use object_store::{Attribute, Attributes, ObjectStore, PutOptions, PutPayload};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
 
-/// How long a signed download link stays valid.
-pub const SIGNED_URL_TTL: Duration = Duration::from_secs(300);
+pub const CONTENT_TYPE: &str = "application/json";
 
-#[derive(Clone, Debug)]
-pub struct S3Config {
-    /// Where the API reaches the storage (inside the container network).
-    pub endpoint: String,
-    /// Where a browser reaches it; signed URLs are made for this address.
-    pub public_endpoint: String,
-    pub bucket: String,
-    pub region: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    /// Prepended to every key (tests use it to stay out of each other's way).
-    pub prefix: String,
-}
-
-impl S3Config {
-    /// Reads `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`
-    /// (required) and `S3_PUBLIC_ENDPOINT`, `S3_REGION` (optional).
-    pub fn from_env() -> Result<Self, String> {
-        let need = |name: &str| std::env::var(name).map_err(|_| format!("{name} must be set (see compose.yaml)"));
-        let endpoint = need("S3_ENDPOINT")?;
-        Ok(S3Config {
-            public_endpoint: std::env::var("S3_PUBLIC_ENDPOINT").unwrap_or_else(|_| endpoint.clone()),
-            endpoint,
-            bucket: need("S3_BUCKET")?,
-            region: std::env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".into()),
-            access_key_id: need("S3_ACCESS_KEY_ID")?,
-            secret_access_key: need("S3_SECRET_ACCESS_KEY")?,
-            prefix: String::new(),
-        })
-    }
-}
-
-/// One stored file, as recorded in the manifest and in `run_artifacts`.
+/// One file, as listed in the manifest.
 #[derive(Clone, Debug, Serialize)]
 pub struct ArtifactMeta {
     pub name: String,
-    pub key: String,
     pub content_type: String,
     pub size_bytes: i64,
     pub sha256: String,
 }
 
-#[derive(Clone)]
-pub struct ArtifactStore {
-    store: AmazonS3,
-    /// Same bucket and credentials, addressed by the public endpoint. Only signs; never connects.
-    signer: AmazonS3,
-    prefix: String,
+fn meta(name: &str, bytes: &[u8]) -> ArtifactMeta {
+    ArtifactMeta {
+        name: name.to_string(),
+        content_type: CONTENT_TYPE.to_string(),
+        size_bytes: bytes.len() as i64,
+        sha256: Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect(),
+    }
 }
 
-const JSON: &str = "application/json";
-
-impl ArtifactStore {
-    pub fn new(config: &S3Config) -> Result<Self, object_store::Error> {
-        let build = |endpoint: &str| {
-            AmazonS3Builder::new()
-                .with_endpoint(endpoint)
-                .with_allow_http(endpoint.starts_with("http://"))
-                .with_bucket_name(&config.bucket)
-                .with_region(&config.region)
-                .with_access_key_id(&config.access_key_id)
-                .with_secret_access_key(&config.secret_access_key)
-                // Path-style addresses (endpoint/bucket/key) work with every S3-compatible server.
-                .with_virtual_hosted_style_request(false)
-                .build()
-        };
-        Ok(ArtifactStore { store: build(&config.endpoint)?, signer: build(&config.public_endpoint)?, prefix: config.prefix.clone() })
-    }
-
-    fn key(&self, run_id: i64, name: &str) -> String {
-        format!("{}runs/{run_id}/{name}", self.prefix)
-    }
-
-    /// Writes every artifact of a finished run, the manifest last, and returns what was written.
-    pub async fn write_run(&self, run_id: i64, out: &RunOutput) -> Result<Vec<ArtifactMeta>, object_store::Error> {
-        let mut written = Vec::new();
-        for (name, bytes) in run_files(run_id, out) {
-            written.push(self.put(run_id, &name, bytes).await?);
-        }
-        let manifest = json!({
-            "run_id": run_id,
-            "world_id": out.result.world_id,
-            "seed": out.result.seed,
-            "iterations": out.result.iterations,
-            "policy": out.result.policy,
-            "schedule_mode": out.result.schedule_mode,
-            "artifacts": written,
-        });
-        written.push(self.put(run_id, "manifest.json", pretty(&manifest)).await?);
-        Ok(written)
-    }
-
-    async fn put(&self, run_id: i64, name: &str, bytes: Vec<u8>) -> Result<ArtifactMeta, object_store::Error> {
-        let key = self.key(run_id, name);
-        let meta = ArtifactMeta {
-            name: name.to_string(),
-            key: key.clone(),
-            content_type: JSON.to_string(),
-            size_bytes: bytes.len() as i64,
-            sha256: Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect(),
-        };
-        let mut attributes = Attributes::new();
-        attributes.insert(Attribute::ContentType, JSON.into());
-        let options = PutOptions { attributes, ..PutOptions::default() };
-        self.store.put_opts(&Path::from(key), PutPayload::from(bytes), options).await?;
-        Ok(meta)
-    }
-
-    /// Reads a stored object back (used by tests to check what was written).
-    #[cfg(test)]
-    pub async fn read(&self, key: &str) -> Result<Vec<u8>, object_store::Error> {
-        use object_store::ObjectStoreExt;
-        Ok(self.store.get(&Path::from(key)).await?.bytes().await?.to_vec())
-    }
-
-    /// A time-limited download link for a stored object.
-    pub async fn signed_url(&self, key: &str) -> Result<String, object_store::Error> {
-        let url = self.signer.signed_url(axum::http::Method::GET, &Path::from(key), SIGNED_URL_TTL).await?;
-        Ok(url.to_string())
-    }
+/// Every file of a finished run, the manifest last: `(what the manifest says about it, its contents)`.
+pub fn files(run_id: i64, out: &RunOutput) -> Vec<(ArtifactMeta, Vec<u8>)> {
+    let mut files: Vec<(ArtifactMeta, Vec<u8>)> = run_files(run_id, out).into_iter().map(|(name, bytes)| (meta(&name, &bytes), bytes)).collect();
+    let manifest = pretty(&json!({
+        "run_id": run_id,
+        "world_id": out.result.world_id,
+        "seed": out.result.seed,
+        "iterations": out.result.iterations,
+        "policy": out.result.policy,
+        "schedule_mode": out.result.schedule_mode,
+        "artifacts": files.iter().map(|(meta, _)| meta).collect::<Vec<_>>(),
+    }));
+    files.push((meta("manifest.json", &manifest), manifest));
+    files
 }
 
 fn pretty(value: &impl Serialize) -> Vec<u8> {

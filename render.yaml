@@ -1,0 +1,93 @@
+# Render Blueprint: the whole production setup. In the Render dashboard: New > Blueprint,
+# pick this repository; Render shows what it will create and what it costs before anything is made.
+#
+# Only the website is public. The API, the worker and the database are reachable from inside
+# the private network only. Everything is in Frankfurt (EU).
+#
+# Values marked `sync: false` are secrets: Render asks for them when the Blueprint is first
+# applied and they are never written in this file.
+
+databases:
+  - name: lilanaya-db
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "17"
+    databaseName: lilanaya
+    user: lilanaya
+    # No address outside Render's private network may connect.
+    ipAllowList: []
+
+envVarGroups:
+  # What both the API and the worker need.
+  - name: lilanaya-shared
+    envVars:
+      # Refuse to start in a state that is only safe on a developer's machine (see main.rs).
+      - key: APP_ENV
+        value: production
+
+services:
+  # The website: nginx serving the static front end and passing /api on to the API.
+  - type: web
+    name: lilanaya-web
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./src/app/web/lilanaya-client/Dockerfile
+    dockerContext: ./src/app/web/lilanaya-client
+    healthCheckPath: /robots.txt
+    envVars:
+      - key: PORT
+        value: "80"
+      - key: API_HOSTPORT
+        fromService:
+          type: pserv
+          name: lilanaya-api
+          property: hostport
+
+  # The API: answers requests. Not reachable from the internet.
+  - type: pserv
+    name: lilanaya-api
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./src/app/api/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: lilanaya-shared
+      - key: ROLE
+        value: api
+      - key: PORT
+        value: "8080"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lilanaya-db
+          property: connectionString
+      # The https address people type to reach the site, e.g. https://lilanaya.example
+      - key: PUBLIC_URL
+        sync: false
+      # The mail server sign-in links are sent through, e.g. smtps://resend:<key>@smtp.resend.com:465
+      - key: SMTP_URL
+        sync: false
+      # Who sign-in emails come from, e.g. Lilanaya <no-reply@lilanaya.example>
+      - key: MAIL_FROM
+        sync: false
+      # Vercel AI Gateway key: the language model and the Jev screen. Leave empty to keep compile off.
+      - key: AI_GATEWAY_API_KEY
+        sync: false
+
+  # The worker: runs queued simulations, one at a time, each in a child process it can stop.
+  - type: worker
+    name: lilanaya-worker
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./src/app/api/Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: lilanaya-shared
+      - key: ROLE
+        value: worker
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lilanaya-db
+          property: connectionString

@@ -1,10 +1,10 @@
 //! Postgres persistence: worlds, strategies, runs (the `runs` table is also
 //! the job queue), per-pairing traces and KPI snapshots.
 
-use crate::artifacts::ArtifactMeta;
 use crate::auth::{User, SESSION_DAYS, SIGN_IN_LINK_MINUTES};
+use crate::llm::Spent;
 use crate::strategies::{RunActor, StrategyDoc};
-use lilanaya_engine::{baseline_strategies, prisoners_dilemma, Issue, RunOutput, RunResult, World};
+use lilanaya_engine::{baseline_strategies, prisoners_dilemma, Issue, MatchTrace, RunOutput, RunResult, World};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgRow};
@@ -59,6 +59,50 @@ pub struct StrategyRow {
 
 /// How many sign-in links one address may ask for per quarter of an hour.
 const SIGN_IN_LINKS_PER_WINDOW: i64 = 5;
+
+/// What became of a request to queue a run.
+#[derive(Debug)]
+pub enum Queued {
+    Run(RunRow),
+    /// The user has started as many runs this month as their plan allows.
+    MonthlyLimit,
+    /// The user already has as many runs queued or running as one user may.
+    TooManyActive,
+}
+
+/// The limits a plain-English compile is held to.
+#[derive(Clone, Copy, Debug)]
+pub struct CompileLimits {
+    /// Compiles one user may ask for in an hour.
+    pub per_hour: i64,
+    /// Descriptions the screen may turn down in 24 hours before the user is shut out.
+    pub blocked_per_day: i64,
+    /// Compiles all users together may ask for in a day (UTC).
+    pub per_day: i64,
+    /// Tokens all compiles together may use in a day (UTC).
+    pub tokens_per_day: i64,
+}
+
+/// Whether a compile may go ahead.
+#[derive(Debug, PartialEq)]
+pub enum CompileGate {
+    /// It may; the id of its row in `llm_calls`, to be completed with [`Store::finish_llm_call`].
+    Started(i64),
+    HourlyLimit,
+    /// The screen has turned this user down too often lately.
+    Suspended,
+    /// All users together have reached the day's ceiling.
+    DailyCeiling,
+}
+
+// Advisory-lock namespaces. A limit is "count, then insert"; taking the lock first makes
+// that one step, so requests arriving together cannot all pass on the same count.
+const LOCK_RUNS: i32 = 1;
+const LOCK_PREVIEWS: i32 = 2;
+const LOCK_SIGN_IN: i32 = 3;
+const LOCK_COMPILE: i32 = 4;
+const LOCK_STRATEGIES: i32 = 5;
+const TAKE_LOCK: &str = "SELECT pg_advisory_xact_lock($1, $2)";
 
 /// One KPI value of one run, with the run's parameters.
 #[derive(Clone, Debug)]
@@ -203,18 +247,26 @@ impl Store {
         sqlx::query(&sql).bind(id).fetch_optional(&self.pool).await?.map(strategy_row).transpose()
     }
 
-    pub async fn insert_strategy(&self, doc: &StrategyDoc, owner: i64, visibility: &str, world_id: &str, prompt: Option<&str>) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO strategies (id, position, doc, owner_id, visibility, mode, world_id, prompt) VALUES ($1, 1000, $2, $3, $4, $5, $6, $7)")
-            .bind(doc.id())
-            .bind(Json(doc))
-            .bind(owner)
-            .bind(visibility)
-            .bind(doc.mode())
-            .bind(world_id)
-            .bind(prompt)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// Saves a new strategy. False if its owner already has `limit` of them.
+    pub async fn insert_strategy(&self, doc: &StrategyDoc, owner: i64, visibility: &str, world_id: &str, prompt: Option<&str>, limit: i64) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(TAKE_LOCK).bind(LOCK_STRATEGIES).bind(owner as i32).execute(&mut *tx).await?;
+        let done = sqlx::query(
+            "INSERT INTO strategies (id, position, doc, owner_id, visibility, mode, world_id, prompt) \
+             SELECT $1, 1000, $2, $3, $4, $5, $6, $7 WHERE (SELECT count(*) FROM strategies WHERE owner_id = $3) < $8",
+        )
+        .bind(doc.id())
+        .bind(Json(doc))
+        .bind(owner)
+        .bind(visibility)
+        .bind(doc.mode())
+        .bind(world_id)
+        .bind(prompt)
+        .bind(limit)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(done.rows_affected() == 1)
     }
 
     /// Replaces a strategy its owner has edited. False if it is not theirs.
@@ -244,6 +296,8 @@ impl Store {
 
     /// Stores a one-time sign-in token. False if this address has asked too often lately.
     pub async fn create_sign_in_token(&self, email: &str, token_hash: &str) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1, hashtext($2))").bind(LOCK_SIGN_IN).bind(email).execute(&mut *tx).await?;
         let done = sqlx::query(&format!(
             "INSERT INTO sign_in_tokens (token_hash, email, expires_at) \
              SELECT $1, $2, now() + interval '{SIGN_IN_LINK_MINUTES} minutes' \
@@ -252,8 +306,9 @@ impl Store {
         .bind(token_hash)
         .bind(email)
         .bind(SIGN_IN_LINKS_PER_WINDOW)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(done.rows_affected() == 1)
     }
 
@@ -270,6 +325,18 @@ impl Store {
     pub async fn upsert_user(&self, email: &str, default_name: &str) -> Result<User, sqlx::Error> {
         let sql = format!("INSERT INTO users (email, display_name) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING {USER_COLUMNS}");
         sqlx::query(&sql).bind(email).bind(default_name).fetch_one(&self.pool).await.and_then(user_row)
+    }
+
+    /// The user this outside account (say, Google account 123) signs in as, if it has signed in before.
+    pub async fn identity_user(&self, provider: &str, subject: &str) -> Result<Option<User>, sqlx::Error> {
+        let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = (SELECT user_id FROM user_identities WHERE provider = $1 AND subject = $2)");
+        sqlx::query(&sql).bind(provider).bind(subject).fetch_optional(&self.pool).await?.map(user_row).transpose()
+    }
+
+    /// From now on this outside account signs in as this user.
+    pub async fn link_identity(&self, provider: &str, subject: &str, user_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO user_identities (provider, subject, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING").bind(provider).bind(subject).bind(user_id).execute(&self.pool).await?;
+        Ok(())
     }
 
     pub async fn create_session(&self, user_id: i64, token_hash: &str) -> Result<(), sqlx::Error> {
@@ -314,23 +381,88 @@ impl Store {
         Ok((row.try_get("period")?, row.try_get("used")?))
     }
 
-    /// Notes one plain-English compile, unless the user has reached the hourly limit (then false).
-    pub async fn record_llm_call(&self, user_id: i64, hourly_limit: i64) -> Result<bool, sqlx::Error> {
+    /// Notes one strategy check (a preview or a save), unless the user has reached the hourly limit (then false).
+    pub async fn record_preview(&self, user_id: i64, hourly_limit: i64) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(TAKE_LOCK).bind(LOCK_PREVIEWS).bind(user_id as i32).execute(&mut *tx).await?;
         let done = sqlx::query(
-            "INSERT INTO llm_calls (user_id) SELECT $1 \
-             WHERE (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND created_at > now() - interval '1 hour') < $2",
+            "INSERT INTO preview_calls (user_id) SELECT $1 \
+             WHERE (SELECT count(*) FROM preview_calls WHERE user_id = $1 AND created_at > now() - interval '1 hour') < $2",
         )
         .bind(user_id)
         .bind(hourly_limit)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(done.rows_affected() == 1)
+    }
+
+    /// Notes the start of one plain-English compile, unless a limit says no. A compile
+    /// that is let through counts against the limits whatever comes of it.
+    pub async fn begin_llm_call(&self, user_id: i64, limits: CompileLimits) -> Result<CompileGate, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        // One lock for everyone: the daily ceiling is shared by all users.
+        sqlx::query(TAKE_LOCK).bind(LOCK_COMPILE).bind(0i32).execute(&mut *tx).await?;
+        let today = "created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'";
+        let row = sqlx::query(&format!(
+            "SELECT (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND created_at > now() - interval '1 hour') AS hour, \
+                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND blocked AND created_at > now() - interval '24 hours') AS blocked, \
+                    (SELECT count(*) FROM llm_calls WHERE {today}) AS day, \
+                    (SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint FROM llm_calls WHERE {today}) AS tokens"
+        ))
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let count = |name: &str| row.try_get::<i64, _>(name);
+        if count("blocked")? >= limits.blocked_per_day {
+            return Ok(CompileGate::Suspended);
+        }
+        if count("hour")? >= limits.per_hour {
+            return Ok(CompileGate::HourlyLimit);
+        }
+        if count("day")? >= limits.per_day || count("tokens")? >= limits.tokens_per_day {
+            return Ok(CompileGate::DailyCeiling);
+        }
+        let id: i64 = sqlx::query("INSERT INTO llm_calls (user_id) VALUES ($1) RETURNING id").bind(user_id).fetch_one(&mut *tx).await?.try_get("id")?;
+        tx.commit().await?;
+        Ok(CompileGate::Started(id))
+    }
+
+    /// Completes the record of a compile: what the screen said and what the calls used.
+    pub async fn finish_llm_call(&self, id: i64, spent: &Spent) -> Result<(), sqlx::Error> {
+        let verdict = spent.verdict.as_ref();
+        sqlx::query("UPDATE llm_calls SET verdict = $2, confidence = $3, blocked = $4, input_tokens = $5, output_tokens = $6 WHERE id = $1")
+            .bind(id)
+            .bind(verdict.map(|v| v.label.as_str()))
+            .bind(verdict.map(|v| v.confidence))
+            .bind(verdict.is_some_and(|v| !v.allowed))
+            .bind(spent.input_tokens)
+            .bind(spent.output_tokens)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     // --- runs ---
 
-    /// Adds a run to the queue.
-    pub async fn enqueue(&self, input: &RunInput, user_id: i64, private: bool) -> Result<RunRow, sqlx::Error> {
+    /// Adds a run to the queue, unless the user has used up the month's runs
+    /// (`monthly_limit`) or already has `active_limit` runs queued or running.
+    pub async fn enqueue(&self, input: &RunInput, user_id: i64, private: bool, monthly_limit: i64, active_limit: i64) -> Result<Queued, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(TAKE_LOCK).bind(LOCK_RUNS).bind(user_id as i32).execute(&mut *tx).await?;
+        let row = sqlx::query(
+            "SELECT (SELECT count(*) FROM runs WHERE user_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS month, \
+                    (SELECT count(*) FROM runs WHERE user_id = $1 AND status IN ('queued', 'running')) AS active",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if row.try_get::<i64, _>("month")? >= monthly_limit {
+            return Ok(Queued::MonthlyLimit);
+        }
+        if row.try_get::<i64, _>("active")? >= active_limit {
+            return Ok(Queued::TooManyActive);
+        }
         let sql = format!(
             "INSERT INTO runs (world_id, world_name, seed, iterations, actor_count, input, user_id, private) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {}",
@@ -345,9 +477,10 @@ impl Store {
             .bind(Json(input))
             .bind(user_id)
             .bind(private)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
-        run_row(row)
+        tx.commit().await?;
+        Ok(Queued::Run(run_row(row)?))
     }
 
     /// Takes the oldest queued run and marks it running. Safe with several
@@ -363,9 +496,8 @@ impl Store {
         row.map(|r| Ok((r.try_get("id")?, r.try_get::<Json<RunInput>, _>("input")?.0))).transpose()
     }
 
-    /// Stores a finished run: summary, traces, KPI snapshots and the list of
-    /// files written to object storage, all or nothing.
-    pub async fn complete(&self, id: i64, out: &RunOutput, artifacts: &[ArtifactMeta]) -> Result<(), sqlx::Error> {
+    /// Stores a finished run: summary, traces and KPI snapshots, all or nothing.
+    pub async fn complete(&self, id: i64, out: &RunOutput) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE runs SET status = 'completed', result = $2, finished_at = now() WHERE id = $1")
             .bind(id)
@@ -392,37 +524,7 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
         }
-        for a in artifacts {
-            sqlx::query("INSERT INTO run_artifacts (run_id, name, key, content_type, size_bytes, sha256) VALUES ($1, $2, $3, $4, $5, $6)")
-                .bind(id)
-                .bind(&a.name)
-                .bind(&a.key)
-                .bind(&a.content_type)
-                .bind(a.size_bytes)
-                .bind(&a.sha256)
-                .execute(&mut *tx)
-                .await?;
-        }
         tx.commit().await
-    }
-
-    /// The run's manifest: every file it wrote to object storage, by name.
-    pub async fn artifacts(&self, run_id: i64) -> Result<Vec<ArtifactMeta>, sqlx::Error> {
-        let rows = sqlx::query("SELECT name, key, content_type, size_bytes, sha256 FROM run_artifacts WHERE run_id = $1 ORDER BY name")
-            .bind(run_id)
-            .fetch_all(&self.pool)
-            .await?;
-        rows.into_iter()
-            .map(|r| {
-                Ok(ArtifactMeta {
-                    name: r.try_get("name")?,
-                    key: r.try_get("key")?,
-                    content_type: r.try_get("content_type")?,
-                    size_bytes: r.try_get("size_bytes")?,
-                    sha256: r.try_get("sha256")?,
-                })
-            })
-            .collect()
     }
 
     pub async fn fail(&self, id: i64, message: &str, details: &[Issue]) -> Result<(), sqlx::Error> {
@@ -463,6 +565,12 @@ impl Store {
             run_columns()
         );
         sqlx::query(&sql).bind(world_id).bind(run_id).fetch_optional(&self.pool).await?.map(run_row).transpose()
+    }
+
+    /// A finished run as the engine gave it: the summary and every pairing's rounds.
+    pub async fn run_output(&self, run_id: i64, result: &RunResult) -> Result<RunOutput, sqlx::Error> {
+        let traces = self.traces(run_id).await?.into_iter().map(|(a, b, moves)| MatchTrace { a, b, moves }).collect();
+        Ok(RunOutput { result: result.clone(), traces })
     }
 
     /// Every pairing of a run with its rounds: `(a, b, moves)`, one `[a's move, b's move]` per round.

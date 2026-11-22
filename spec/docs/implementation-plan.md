@@ -74,7 +74,7 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 - [x] Entitlement flags from the user's plan (`/api/me/entitlements`), no billing yet.
 - [x] Quota readout (`/api/usage`): runs used this month against the plan's allowance. Not enforced yet.
 - [x] Strategies and runs have an owner; private ones answer 404 to everyone else and are left out of lists and world analytics.
-- [ ] Sign in with Google and GitHub — waiting for OAuth app credentials from the user.
+- [x] Sign in with Google, Apple, Facebook and GitHub (user, 2026-11-22): server-side authorization-code flow; each provider is behind its own flag (`GOOGLE_SIGN_IN`, `APPLE_SIGN_IN`, `FACEBOOK_SIGN_IN`, `GITHUB_SIGN_IN`), all off for now (user, 2026-11-22); a provider that is switched on must have its credentials in the environment (`.env.example` lists them and the redirect addresses to register). An outside account is tied to a user in `user_identities`; a new one joins the user with the same provider-verified address, and an account without a verified address is refused. Verified against stand-in provider servers only: no real provider has been tried yet (needs the app credentials; Apple also needs an https address on a real domain).
 
 ### 5b — Strategy authoring (2.1, 2.2, 2.4)
 
@@ -98,13 +98,13 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 
 ## Decided
 
-- Artifacts go to S3-compatible object storage (user, 2026-11-18).
+- Artifacts go to S3-compatible object storage (user, 2026-11-18). Superseded 2026-11-22: no object storage; a run's files are built on request from Postgres (see `security-audit.md`, Decisions).
 - Accounts come before authoring (user, 2026-11-18).
 - Plain-English compile: a Claude API key in dev/test, an Azure-provisioned endpoint in production; both must work (user, 2026-11-18). The Azure endpoint is Azure OpenAI, Responses API (user, 2026-11-19), so production runs an OpenAI model and dev/test runs Claude; the compile prompt has to work on both.
 - Code strategies are written in JavaScript (user, 2026-11-18).
 
 ## Open decisions (ask, do not assume)
 
-- OAuth app credentials for Google and GitHub sign-in, and the SMTP service for sign-in emails in production.
+- App credentials for Google, Apple, Facebook and GitHub sign-in (the code is in place and waits for them), and the SMTP service for sign-in emails in production.
 - Payment provider for subscriptions (needed for the billing item).
 - Whether the embedded JavaScript interpreter is isolation enough for public launch, or code strategies must move to a separate process or WebAssembly first.

@@ -1,14 +1,14 @@
 //! HTTP routes. Everything lives under `/api` and speaks JSON.
 
-use crate::artifacts::pair_metrics;
+use crate::artifacts::{self, pair_metrics};
 use crate::auth::{User, Viewer};
 use crate::error::ApiError;
-use crate::strategies::RunActor;
-use crate::store::{RunInput, RunRow};
+use crate::store::{Queued, RunInput, RunRow};
+use crate::strategies::{RunActor, StrategyDoc};
 use crate::worker::AppState;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -25,6 +25,8 @@ pub const MAX_RUN_ACTORS: usize = 16;
 /// Largest integer JavaScript represents exactly; seeds must survive a round trip through the browser.
 pub const MAX_SEED: u64 = (1 << 53) - 1;
 const RUN_LIST_LIMIT: i64 = 100;
+/// The largest request body: room for the biggest strategy that passes validation, and little more.
+const MAX_BODY_BYTES: usize = 128 * 1024;
 const KPI_HISTORY_DEFAULT: i64 = 10;
 const KPI_HISTORY_MAX: i64 = 100;
 
@@ -44,6 +46,9 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/auth/email", post(account::request_link))
         .route("/api/auth/email/confirm", post(account::confirm_link))
         .route("/api/auth/sign-out", post(account::sign_out))
+        .route("/api/auth/providers", get(federated::providers))
+        .route("/api/auth/{provider}/start", get(federated::start))
+        .route("/api/auth/{provider}/callback", get(federated::callback).post(federated::callback_form))
         .route("/api/session", get(account::session))
         .route("/api/me", get(account::me).patch(account::update_me))
         .route("/api/me/entitlements", get(account::entitlements))
@@ -62,6 +67,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .method_not_allowed_fallback(|| async {
             ApiError::new(StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed", "This route does not support that method")
         })
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -234,6 +240,8 @@ struct RunRequest {
 /// Checks the request, queues the run and answers 202 with the queued run.
 /// Poll `GET /api/runs/{id}` until `status` is `completed` or `failed`.
 /// Needs a signed-in user. A run that enters a private strategy is itself private.
+/// Answers 429 when the user has used up the month's runs (`run_limit_reached`)
+/// or already has as many runs waiting or running as one user may (`too_many_runs`).
 async fn create_run(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> Result<(StatusCode, Json<Value>), ApiError> {
     let req: RunRequest = parse_json(body)?;
     let invalid = |issues| ApiError::invalid("The run request is not valid", issues);
@@ -276,8 +284,11 @@ async fn create_run(State(state): Shared, user: User, body: Result<Bytes, BytesR
         }
         match strategies.iter().find(|s| s.doc.id() == id) {
             Some(s) => {
-                // Catch a strategy that does not fit this world now, not in the worker.
-                issues.extend(s.doc.validate(&world.decisions.allowed).into_iter().map(|e| Issue::new(format!("actors[{i}].{}", e.path), e.message)));
+                // Catch rules that do not fit this world now, not in the worker. Code was run when it
+                // was saved and is not run again here: nothing a user wrote executes in a request.
+                if let StrategyDoc::Rules(rules) = &s.doc {
+                    issues.extend(rules.validate(&world.decisions.allowed).into_iter().map(|e| Issue::new(format!("actors[{i}].{}", e.path), e.message)));
+                }
                 private |= s.visibility == "private";
                 actors.push(RunActor { id: id.clone(), name: s.doc.name().to_string(), strategy: s.doc.clone() });
             }
@@ -288,7 +299,25 @@ async fn create_run(State(state): Shared, user: User, body: Result<Bytes, BytesR
         return Err(invalid(issues));
     }
 
-    let run = state.store.enqueue(&RunInput { world, actors, seed }, user.id, private).await?;
+    let monthly = state.config.monthly_runs(&user.plan);
+    let active = state.config.max_active_runs;
+    let run = match state.store.enqueue(&RunInput { world, actors, seed }, user.id, private, monthly, active).await? {
+        Queued::Run(run) => run,
+        Queued::MonthlyLimit => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "run_limit_reached",
+                format!("You have used all {monthly} runs your plan gives you this month. The count starts again on the 1st."),
+            ))
+        }
+        Queued::TooManyActive => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_runs",
+                format!("You already have {active} {} waiting or running. Start this one when one of them has finished.", if active == 1 { "run" } else { "runs" }),
+            ))
+        }
+    };
     state.wake.notify_one();
     Ok((StatusCode::ACCEPTED, Json(run_json(&run))))
 }
@@ -402,16 +431,24 @@ async fn get_race(State(state): Shared, viewer: Viewer, Path(id): Path<String>) 
     Ok(Json(json!({ "run_id": run.id, "iterations": r.iterations, "rounds": rounds, "matches": matches })))
 }
 
-/// The run's manifest: the files it wrote to object storage, with size and
-/// checksum. `href` answers with a redirect to a short-lived signed URL.
+/// The files of a run, built from what the database holds. A run that has not completed has none.
+async fn run_files(state: &AppState, run: &RunRow) -> Result<Vec<(artifacts::ArtifactMeta, Vec<u8>)>, ApiError> {
+    let Some(result) = &run.result else {
+        return Ok(Vec::new());
+    };
+    let out = state.store.run_output(run.id, result).await?;
+    let id = run.id;
+    // A large run is megabytes of JSON to write and hash: keep that off the async threads.
+    tokio::task::spawn_blocking(move || artifacts::files(id, &out)).await.map_err(|e| ApiError::internal(format!("build run files: {e}")))
+}
+
+/// The run's manifest: its files, with size and checksum. `href` answers with the file.
 async fn list_artifacts(State(state): Shared, viewer: Viewer, Path(id): Path<String>) -> ApiResult {
     let run = find_run(&state, &id, &viewer).await?;
-    let artifacts: Vec<Value> = state
-        .store
-        .artifacts(run.id)
+    let artifacts: Vec<Value> = run_files(&state, &run)
         .await?
         .into_iter()
-        .map(|a| {
+        .map(|(a, _)| {
             json!({
                 "name": a.name,
                 "content_type": a.content_type,
@@ -424,19 +461,17 @@ async fn list_artifacts(State(state): Shared, viewer: Viewer, Path(id): Path<Str
     Ok(Json(json!({ "run_id": run.id, "status": run.status, "artifacts": artifacts })))
 }
 
-/// Redirects (302) to a signed URL for one of the run's files; the link is
-/// valid for a few minutes.
+/// One of the run's files.
 async fn get_artifact(State(state): Shared, viewer: Viewer, Path((id, name)): Path<(String, String)>) -> Result<Response, ApiError> {
     let run = find_run(&state, &id, &viewer).await?;
-    let artifact = state
-        .store
-        .artifacts(run.id)
-        .await?
-        .into_iter()
-        .find(|a| a.name == name)
-        .ok_or_else(|| ApiError::not_found(format!("File \"{name}\" of run {id}")))?;
-    let url = state.artifacts.signed_url(&artifact.key).await.map_err(|e| ApiError::internal(format!("sign url: {e}")))?;
-    Ok((StatusCode::FOUND, [(header::LOCATION, url), (header::CACHE_CONTROL, "no-store".to_string())]).into_response())
+    let (_, bytes) = run_files(&state, &run).await?.into_iter().find(|(a, _)| a.name == name).ok_or_else(|| ApiError::not_found(format!("File \"{name}\" of run {id}")))?;
+    let headers = [
+        (header::CONTENT_TYPE, artifacts::CONTENT_TYPE),
+        // A private run's files must not be kept by anything between us and the browser.
+        (header::CACHE_CONTROL, "private, no-store"),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+    ];
+    Ok((headers, bytes).into_response())
 }
 
 /// The same match seen from the other side.
@@ -520,6 +555,7 @@ fn parse_json<T: DeserializeOwned>(body: Result<Bytes, BytesRejection>) -> Resul
 
 mod account;
 mod authoring;
+mod federated;
 
 #[cfg(test)]
 mod tests;

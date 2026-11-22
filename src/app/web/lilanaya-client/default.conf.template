@@ -1,0 +1,58 @@
+# The nginx image fills in ${API_HOSTPORT} and ${NGINX_LOCAL_RESOLVERS} from the environment
+# when the container starts (see the Dockerfile). nginx's own $variables are left alone.
+
+# Request limits per client address. A request over the limit is answered 429.
+# Sign-in routes are strict: they send email and create accounts.
+limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
+limit_req_status 429;
+
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    server_tokens off;
+
+    # Behind a host's proxy (private addresses only) the client's own address arrives in
+    # X-Forwarded-For; the limits above must count that one, not the proxy's.
+    set_real_ip_from 10.0.0.0/8;
+    set_real_ip_from 172.16.0.0/12;
+    set_real_ip_from 192.168.0.0/16;
+    set_real_ip_from 100.64.0.0/10;
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive on;
+
+    # Look the API up through the container's own DNS on each request (cached 10s) instead
+    # of once at start-up, so the proxy keeps working when the API is restarted or moved.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+
+    # The API takes bodies up to 128 KB; refuse larger ones here.
+    client_max_body_size 128k;
+
+    # The site loads nothing from anywhere else and is never shown inside another page.
+    # (add_header is not inherited by a block that has its own, hence the include.)
+    include /etc/nginx/security-headers.conf;
+
+    location /api/auth/ {
+        limit_req zone=auth burst=10 nodelay;
+        set $api http://${API_HOSTPORT};
+        proxy_pass $api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /api/ {
+        # The results page asks for a run twice a second while it waits; this leaves room for that and more.
+        limit_req zone=api burst=60 nodelay;
+        set $api http://${API_HOSTPORT};
+        proxy_pass $api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Always revalidate, so edits show up on refresh.
+    location / {
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -14,7 +14,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-const MAX_DISPLAY_NAME_CHARS: usize = 60;
+pub(super) const MAX_DISPLAY_NAME_CHARS: usize = 60;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,7 +23,7 @@ struct EmailBody {
 }
 
 /// Lower-cased address if it looks like one. The real check is that the link arrives.
-fn normalise_email(raw: &str) -> Option<String> {
+pub(super) fn normalise_email(raw: &str) -> Option<String> {
     let email = raw.trim().to_lowercase();
     let (local, domain) = email.split_once('@')?;
     let plausible = !local.is_empty()
@@ -129,11 +129,11 @@ fn entitlements_json(user: &User) -> Value {
     json!({ "plan": user.plan, "analytics_access": subscriber, "quick_test_access": subscriber, "private_worlds": subscriber })
 }
 
-/// Runs started this calendar month against the plan's allowance. Shown only; nothing is refused yet.
+/// Runs started this calendar month against the plan's allowance, and how many may wait or run at once.
 async fn usage_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
     let (period, used) = state.store.runs_this_month(user.id).await?;
     let monthly = state.config.monthly_runs(&user.plan);
-    Ok(json!({ "period": period, "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": false }))
+    Ok(json!({ "period": period, "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": true, "max_active_runs": state.config.max_active_runs }))
 }
 
 async fn me_json(state: &AppState, user: &User) -> Result<Value, ApiError> {

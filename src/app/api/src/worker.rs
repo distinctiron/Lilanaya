@@ -1,29 +1,37 @@
-//! The background worker: takes queued runs one at a time, executes them off
-//! the async threads, writes their artifacts to object storage and stores the outcome.
+//! The background worker: takes queued runs one at a time, executes each in a
+//! child process it can stop (`isolate.rs`) and stores the outcome.
 
-use crate::artifacts::ArtifactStore;
 use crate::config::Config;
+use crate::isolate::{self, Failure};
 use crate::llm::Llm;
 use crate::mail::Mailer;
+use crate::oauth::OAuth;
 use crate::store::Store;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, Semaphore};
 
 pub struct AppState {
     pub store: Store,
-    pub artifacts: ArtifactStore,
     pub mailer: Mailer,
     /// The model behind plain-English compile; `None` switches the feature off.
     pub llm: Option<Llm>,
+    /// Sign-in through Google, Apple, Facebook and GitHub; only the ones with credentials.
+    pub oauth: OAuth,
     pub config: Config,
     /// Poked whenever a run is queued, so the worker starts at once.
     pub wake: Notify,
+    /// Strategy checks (previews and saves) running at the same time. Each is a child
+    /// process busy for up to a few seconds; more than this wait their turn.
+    pub sandbox: Semaphore,
 }
 
+/// How many strategy checks may run at once.
+const SANDBOX_SLOTS: usize = 4;
+
 impl AppState {
-    pub fn new(store: Store, artifacts: ArtifactStore, mailer: Mailer, llm: Option<Llm>, config: Config) -> Arc<Self> {
-        Arc::new(AppState { store, artifacts, mailer, llm, config, wake: Notify::new() })
+    pub fn new(store: Store, mailer: Mailer, llm: Option<Llm>, oauth: OAuth, config: Config) -> Arc<Self> {
+        Arc::new(AppState { store, mailer, llm, oauth, config, wake: Notify::new(), sandbox: Semaphore::new(SANDBOX_SLOTS) })
     }
 }
 
@@ -37,20 +45,17 @@ pub fn spawn(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
         loop {
             match state.store.claim().await {
                 Ok(Some((id, input))) => {
-                    let outcome =
-                        tokio::task::spawn_blocking(move || crate::strategies::execute(&input)).await;
-                    let stored = match outcome {
-                        // A run is only "completed" once its files are in object storage.
-                        Ok(Ok(out)) => match state.artifacts.write_run(id, &out).await {
-                            Ok(written) => state.store.complete(id, &out, &written).await,
-                            Err(e) => {
-                                eprintln!("run {id}: could not write artifacts: {e}");
-                                state.store.fail(id, "The run's files could not be written to storage", &[]).await
-                            }
-                        },
+                    let limit = isolate::run_limit(&input);
+                    let stored = match isolate::execute(input, limit).await {
+                        Ok(Ok(out)) => state.store.complete(id, &out).await,
                         Ok(Err(issues)) => state.store.fail(id, "The run could not be completed", &issues).await,
-                        Err(panic) => {
-                            eprintln!("run {id}: engine panicked: {panic}");
+                        Err(Failure::TimedOut(limit)) => {
+                            eprintln!("run {id}: stopped after {} s", limit.as_secs());
+                            let message = format!("The run was stopped by the server after {} seconds: a strategy in it takes too long to decide", limit.as_secs());
+                            state.store.fail(id, &message, &[]).await
+                        }
+                        Err(Failure::Broken(detail)) => {
+                            eprintln!("run {id}: {detail}");
                             state.store.fail(id, "The simulation stopped unexpectedly", &[]).await
                         }
                     };

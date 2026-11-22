@@ -2792,3 +2792,8 @@ html:has(.screens) {
 		gap: 6px;
 	}
 }
+
+/* Shown instead of the app when JavaScript is off. A class, not a style attribute: the site's content policy allows no inline styles. */
+.noscript {
+	padding: 32px;
+}

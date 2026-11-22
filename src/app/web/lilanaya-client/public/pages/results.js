@@ -165,7 +165,7 @@ const points = (n) => Math.round(n).toLocaleString('en');
 
 const kb = (bytes) => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
 
-/** The run's files in object storage. Each link goes through the API, which redirects to a short-lived signed URL. */
+/** The run's files. Each link goes to the API, which builds the file on request. */
 function downloadsSection(files) {
 	if (!files.length) return null;
 	const link = (f, label) => h('li', null, [h('a', { href: f.href }, label ?? f.name), h('span', { class: 'muted' }, `  ${kb(f.size_bytes)}`)]);

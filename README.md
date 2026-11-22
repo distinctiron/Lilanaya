@@ -30,10 +30,11 @@ Initial target world: Prisoner’s Dilemma (repeated). The system is world‑agn
 
 - Back end: Rust (axum on tokio), one Cargo workspace rooted at the repository root.
 - Front end: vanilla JavaScript (native ES modules, no framework or build step), served by nginx.
-- Storage: Postgres (worlds, strategies, runs, traces, KPI snapshots; the `runs` table doubles as the job queue) and S3-compatible object storage for run artifacts (Versity S3 Gateway locally; any S3 service via the `S3_*` settings).
-- Accounts: sign-in by emailed one-time link, session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
-- Code strategies: JavaScript, run in an embedded QuickJS interpreter with a memory cap and a step budget, no clock, no randomness, no I/O.
-- Plain-English strategy compile: a language model, either Claude through the Claude API (development) or a model deployed in Azure OpenAI (production).
+- Storage: Postgres only (worlds, strategies, runs, traces, KPI snapshots; the `runs` table doubles as the job queue). A run's downloadable files are built on request from what the database holds.
+- Accounts: sign-in by emailed one-time link, or through Google, Apple, Facebook or GitHub (each behind its own flag, such as `GOOGLE_SIGN_IN=on`, all off by default; see `.env.example`); session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
+- Code strategies: JavaScript, run in an embedded QuickJS interpreter with a 1 MB memory cap and a step budget, no clock, no randomness, no I/O. Everything that executes a strategy (previews, saves, runs) happens in a child process with a time limit, so a slow strategy is stopped instead of holding the server.
+- Plain-English strategy compile: a language model reached through Vercel AI Gateway. Every description is first screened by Jev (a classifier, through the same gateway); one that is not a strategy description never reaches the model. Compile is limited per user per hour and for all users together per day.
+- Usage limits: runs per month by plan, runs waiting at once, strategy checks and compiles per hour (see `.env.example`); request limits per client address in nginx.
 - Everything runs in containers; no local Rust toolchain is required.
 
 ## Running locally
@@ -52,15 +53,15 @@ docker compose -f compose.prod.yaml up --build
 # app  http://localhost:3000
 ```
 
-Both stacks include Postgres and an S3-compatible store on http://localhost:9000 (signed download links point there); data lives in Docker volumes (`docker compose down -v` wipes them). The production build needs an up-to-date `Cargo.lock`.
+Both stacks include Postgres; data lives in Docker volumes (`docker compose down -v` wipes them). The production build needs an up-to-date `Cargo.lock`.
 
 Settings that are secret or differ per deployment go in a `.env` file next to the compose files (git-ignored; start from `.env.example`):
 
-- Plain-English compile is off until a key is set: `ANTHROPIC_API_KEY` for the Claude API, or `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_URL` (the full address of the responses endpoint) and `LLM_MODEL` (the deployment name) for Azure OpenAI. `LLM_PROVIDER` chooses when both keys are set.
+- Plain-English compile is off until `AI_GATEWAY_API_KEY` (a Vercel AI Gateway API key) is set. `LLM_MODEL` picks the model (default `anthropic/claude-opus-5.5`).
 - The production-like stack needs `PUBLIC_URL` and `SMTP_URL` for sign-in emails. Without `SMTP_URL` the links are only printed to the API log.
 - A user's plan (`free` or `subscriber`) is a column in `users`; there is no billing yet, so change it with SQL.
 
-Tests (engine and API; the API tests use the compose Postgres and object store, one throwaway schema and key prefix per test):
+Tests (engine and API; the API tests use the compose Postgres, one throwaway schema per test):
 
 ```bash
 docker compose run --rm api cargo test
@@ -79,13 +80,13 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 | `GET /api/me`, `PATCH /api/me`, `GET /api/me/entitlements`, `GET /api/usage` | Profile, display name, plan flags, runs used this month (401 when signed out) |
 | `GET /api/strategies`, `GET /api/strategies/{id}` | Built-in, public and own strategies: rules (state machines as data) or code |
 | `POST /api/strategies`, `PUT` / `DELETE /api/strategies/{id}` | Create, replace, delete own strategies (signed in). `mode` is `rules` or `code` and cannot change |
-| `POST /api/strategies/preview` | Checks a draft and plays two sample matches: `{valid, errors, warnings, samples}` (signed in; no quota) |
-| `POST /api/strategies/compile` | Plain English to rules through the language model (signed in; limited per hour) |
-| `POST /api/runs` | Queues a run (202; signed in). Body: `world_id`, optional `actors`, `iterations`, `seed`, `policy`, `schedule_mode` |
+| `POST /api/strategies/preview` | Checks a draft and plays two sample matches: `{valid, errors, warnings, samples}` (signed in; no run quota, limited per hour) |
+| `POST /api/strategies/compile` | Plain English to rules through the language model (signed in; screened first, 422 `prompt_blocked` if turned down; limited per hour and per day) |
+| `POST /api/runs` | Queues a run (202; signed in). Body: `world_id`, optional `actors`, `iterations`, `seed`, `policy`, `schedule_mode`. 429 `run_limit_reached` when the month's runs are used up, `too_many_runs` when too many are waiting |
 | `GET /api/runs`, `GET /api/runs/{id}` | Run list; one run with status and, once completed, its results. Private runs answer 404 to everyone but their owner |
 | `GET /api/runs/{id}/matches/{a}/{b}` | Round-by-round moves of one pairing |
 | `GET /api/runs/{id}/race` | For every match, both sides' points so far at up to 60 sampled rounds; the results page draws the race from it |
-| `GET /api/runs/{id}/artifacts`, `GET /api/runs/{id}/artifacts/{name}` | The run's files (manifest with sizes and SHA-256); the second redirects to a short-lived signed URL |
+| `GET /api/runs/{id}/artifacts`, `GET /api/runs/{id}/artifacts/{name}` | The run's files (manifest with sizes and SHA-256); the second answers with the file, built on request |
 | `GET /api/worlds/{id}/leaderboard` | Ranking from the latest completed run |
 | `GET /api/worlds/{id}/pairwise?run_id=` | Pairwise metrics: average payoff, outcome mix, first defection, punish duration |
 | `GET /api/worlds/{id}/kpis?limit=&run_id=` | KPI snapshots per run, oldest first, with change from the run before |
@@ -96,6 +97,7 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 - `src/app/api` — Rust API service, Postgres store and run worker
 - `src/app/web/lilanaya-client` — vanilla JS front end (`public/` is served as-is)
 - `compose.yaml`, `compose.prod.yaml` — container setup (development / production-like)
+- `render.yaml` — the production setup on Render (website public; API, worker and database private)
 - `spec/docs` — Technical specifications (PRD, architecture, design, stories)
 - `spec/bmad` — Agentic workflow specifications and guides
 

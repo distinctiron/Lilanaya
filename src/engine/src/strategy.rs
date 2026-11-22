@@ -13,6 +13,9 @@ use std::collections::BTreeMap;
 pub const MAX_STATES: usize = 64;
 pub const MAX_TRANSITIONS: usize = 256;
 const MAX_GUARD_DEPTH: usize = 16;
+/// Conditions in all of a strategy's guards together, nested ones included. Every one
+/// may be evaluated in every round, so this bounds what a round can cost.
+pub const MAX_GUARD_NODES: usize = 512;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Strategy {
@@ -55,6 +58,32 @@ pub enum Guard {
     And { all: Vec<Guard> },
     Or { any: Vec<Guard> },
     Not { guard: Box<Guard> },
+}
+
+impl Guard {
+    /// How many conditions this guard holds, itself included. Stops counting soon after `cap`.
+    fn nodes(&self, cap: usize) -> usize {
+        let mut count = 1;
+        let mut inner: Vec<&Guard> = match self {
+            Guard::And { all } => all.iter().collect(),
+            Guard::Or { any } => any.iter().collect(),
+            Guard::Not { guard } => vec![guard],
+            _ => Vec::new(),
+        };
+        while let Some(g) = inner.pop() {
+            count += 1;
+            if count > cap {
+                break;
+            }
+            match g {
+                Guard::And { all } => inner.extend(all),
+                Guard::Or { any } => inner.extend(any),
+                Guard::Not { guard } => inner.push(guard),
+                _ => {}
+            }
+        }
+        count
+    }
 }
 
 impl Strategy {
@@ -110,6 +139,12 @@ impl Strategy {
                 "transitions",
                 format!("has {} transitions; the limit is {MAX_TRANSITIONS}", self.transitions.len()),
             ));
+        }
+        let nodes: usize = self.transitions.iter().map(|t| t.guard.nodes(MAX_GUARD_NODES + 1)).sum();
+        if nodes > MAX_GUARD_NODES {
+            issues.push(Issue::new("transitions", format!("have more than {MAX_GUARD_NODES} conditions in all; the limit is {MAX_GUARD_NODES}")));
+            // Too large to be worth describing further.
+            return Err(issues);
         }
         for (i, s) in self.states.iter().enumerate() {
             if self.states[..i].contains(s) {
@@ -538,5 +573,18 @@ mod tests {
         ] {
             assert!(paths.contains(&expected), "missing {expected} in {issues:?}");
         }
+    }
+
+    #[test]
+    fn the_conditions_of_all_guards_together_are_limited() {
+        let wide = |n: usize| Guard::Or { any: (0..n).map(|_| Guard::LastOpponentAction { is: "D".into() }).collect() };
+        let mut s = baseline_strategies().into_iter().find(|s| s.id == "tit_for_tat").unwrap();
+        // One "or" and its items: 1 + 400 conditions, on top of the strategy's own.
+        s.transitions[0].guard = wide(400);
+        assert!(s.validate(&cd()).is_empty());
+        s.transitions[0].guard = Guard::Not { guard: Box::new(wide(MAX_GUARD_NODES)) };
+        let issues = s.validate(&cd());
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!((issues[0].path.as_str(), issues[0].message.contains("512 conditions")), ("transitions", true));
     }
 }

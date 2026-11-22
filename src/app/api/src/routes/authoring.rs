@@ -2,23 +2,25 @@
 //! plain-English compile. Everything that writes or computes needs a signed-in user.
 
 use super::{find_world, parse_json, ApiResult, Shared};
-use crate::auth::{new_token, User, Viewer};
+use crate::auth::{hash_token, new_token, User, Viewer};
+use crate::config::BLOCKED_DESCRIPTIONS_PER_DAY;
 use crate::error::ApiError;
-use crate::llm::LlmError;
-use crate::store::StrategyRow;
+use crate::isolate::{self, Failure};
+use crate::llm::{LlmError, Spent};
+use crate::store::{CompileGate, CompileLimits, StrategyRow};
 use crate::strategies::{self, CodeStrategy, CompileError, StrategyDoc, MAX_DESCRIPTION_CHARS, MAX_NAME_CHARS, MAX_PROMPT_CHARS};
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use lilanaya_engine::{Issue, Strategy, Transition};
+use lilanaya_engine::{Issue, Strategy, Transition, World};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 const DEFAULT_WORLD: &str = "prisoners-dilemma";
-const MAX_OWN_STRATEGIES: usize = 100;
+const MAX_OWN_STRATEGIES: i64 = 100;
 
 /// The stored document plus who owns it and whether the viewer does.
 fn strategy_json(row: &StrategyRow, viewer: Option<i64>) -> Value {
@@ -125,6 +127,29 @@ struct Checked {
     prompt: Option<String>,
 }
 
+/// Counts one strategy check against the user's hourly allowance; 429 when it is used up.
+async fn count_check(state: &crate::worker::AppState, user: &User) -> Result<(), ApiError> {
+    let limit = state.config.previews_per_hour;
+    if state.store.record_preview(user.id, limit).await? {
+        return Ok(());
+    }
+    Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "too_many_requests", format!("You can check or save a strategy {limit} times an hour. Try again in a little while.")))
+}
+
+/// The preview of a draft: problems, warnings and sample matches. The draft is run in a
+/// child process that is stopped when it takes too long, and only a few run at a time.
+async fn run_preview(state: &crate::worker::AppState, doc: StrategyDoc, world: World) -> Result<Value, ApiError> {
+    let _slot = state.sandbox.acquire().await.map_err(|e| ApiError::internal(format!("preview: {e}")))?;
+    match isolate::preview(doc, world, isolate::PREVIEW_LIMIT).await {
+        Ok(report) => Ok(report),
+        Err(Failure::TimedOut(limit)) => {
+            let message = format!("took longer than {} seconds to play its sample matches and was stopped; a strategy must decide in a moment", limit.as_secs());
+            Ok(json!({ "valid": false, "errors": [Issue::new("source", message)], "warnings": [], "samples": [] }))
+        }
+        Err(Failure::Broken(detail)) => Err(ApiError::internal(format!("preview: {detail}"))),
+    }
+}
+
 async fn check(state: &crate::worker::AppState, body: StrategyBody, id: &str) -> Result<Checked, ApiError> {
     let mut issues = Vec::new();
     let visibility = body.visibility.clone().unwrap_or_else(|| "private".into());
@@ -150,8 +175,7 @@ async fn check(state: &crate::worker::AppState, body: StrategyBody, id: &str) ->
     let doc = body.into_doc(id, &mut issues);
     if let (Some(doc), Some(world)) = (&doc, &world) {
         // The full check, sample matches included, so code that fails while playing is not saved.
-        let (doc, world) = (doc.clone(), world.clone());
-        let report = tokio::task::spawn_blocking(move || strategies::preview(&doc, &world)).await.map_err(|e| ApiError::internal(format!("preview: {e}")))?;
+        let report = run_preview(state, doc.clone(), world.clone()).await?;
         issues.extend(serde_json::from_value::<Vec<Issue>>(report["errors"].clone()).unwrap_or_default());
     }
     match doc {
@@ -179,13 +203,12 @@ fn new_id(name: &str) -> String {
 
 pub async fn create(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> Result<(StatusCode, Json<Value>), ApiError> {
     let body: StrategyBody = parse_json(body)?;
-    let own = state.store.strategies(Some(user.id)).await?.iter().filter(|s| s.owner_id == Some(user.id)).count();
-    if own >= MAX_OWN_STRATEGIES {
-        return Err(ApiError::new(StatusCode::CONFLICT, "limit_reached", format!("You already have {MAX_OWN_STRATEGIES} strategies; delete one first")));
-    }
+    count_check(&state, &user).await?;
     let id = new_id(&body.name);
     let checked = check(&state, body, &id).await?;
-    state.store.insert_strategy(&checked.doc, user.id, &checked.visibility, &checked.world_id, checked.prompt.as_deref()).await?;
+    if !state.store.insert_strategy(&checked.doc, user.id, &checked.visibility, &checked.world_id, checked.prompt.as_deref(), MAX_OWN_STRATEGIES).await? {
+        return Err(ApiError::new(StatusCode::CONFLICT, "limit_reached", format!("You already have {MAX_OWN_STRATEGIES} strategies; delete one first")));
+    }
     let row = state.store.strategy(&id).await?.ok_or_else(|| ApiError::internal("the strategy just saved is missing"))?;
     Ok((StatusCode::CREATED, Json(strategy_json(&row, Some(user.id)))))
 }
@@ -203,6 +226,7 @@ pub async fn update(State(state): Shared, user: User, Path(id): Path<String>, bo
             vec![Issue::new("mode", format!("this strategy was created as \"{}\" and that cannot be changed", existing.doc.mode()))],
         ));
     }
+    count_check(&state, &user).await?;
     let checked = check(&state, body, &id).await?;
     if !state.store.update_strategy(&checked.doc, user.id, &checked.visibility, &checked.world_id, checked.prompt.as_deref()).await? {
         return Err(ApiError::not_found(format!("Strategy \"{id}\"")));
@@ -228,16 +252,17 @@ struct PreviewBody {
 }
 
 /// Checks a draft without saving it and plays two short sample matches.
-/// Always 200 for a well-formed draft: `{valid, errors, warnings, samples}`. Uses no quota.
-pub async fn preview(State(state): Shared, _user: User, body: Result<Bytes, BytesRejection>) -> ApiResult {
+/// Always 200 for a well-formed draft: `{valid, errors, warnings, samples}`. Uses no run
+/// quota, but checks are limited per hour (429).
+pub async fn preview(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> ApiResult {
     let req: PreviewBody = parse_json(body)?;
     let world = find_world(&state, req.world_id.as_deref().unwrap_or(DEFAULT_WORLD)).await?;
     let mut issues = Vec::new();
     let Some(doc) = req.strategy.into_doc("draft", &mut issues).filter(|_| issues.is_empty()) else {
         return Ok(Json(json!({ "valid": false, "errors": issues, "warnings": [], "samples": [] })));
     };
-    let report = tokio::task::spawn_blocking(move || strategies::preview(&doc, &world)).await.map_err(|e| ApiError::internal(format!("preview: {e}")))?;
-    Ok(Json(report))
+    count_check(&state, &user).await?;
+    Ok(Json(run_preview(&state, doc, world).await?))
 }
 
 #[derive(Deserialize)]
@@ -251,6 +276,9 @@ struct CompileBody {
 /// The rules come back for the editor (not saved), with the model's reasoning,
 /// the flags raised about the description (`flags`: rule violations and assumptions)
 /// and any problems the validator still finds.
+///
+/// The description is screened before every call to the model (`guard.rs`); one that
+/// is turned down answers 422 `prompt_blocked` and never reaches the model.
 pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> ApiResult {
     let req: CompileBody = parse_json(body)?;
     let Some(llm) = &state.llm else {
@@ -261,15 +289,49 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
     if length < 10 || length > MAX_PROMPT_CHARS {
         return Err(ApiError::invalid("The description is not valid", vec![Issue::new("prompt", format!("must be 10 to {MAX_PROMPT_CHARS} characters"))]));
     }
-    let world = find_world(&state, req.world_id.as_deref().unwrap_or(DEFAULT_WORLD)).await?;
-    if !state.store.record_llm_call(user.id, state.config.compiles_per_hour).await? {
-        return Err(ApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "too_many_requests",
-            format!("You can compile {} descriptions an hour. Try again later, or edit the rules by hand.", state.config.compiles_per_hour),
-        ));
+    if prompt.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')) {
+        return Err(ApiError::invalid("The description is not valid", vec![Issue::new("prompt", "must be plain text")]));
     }
-    match strategies::compile(llm, &world, prompt).await {
+    let world = find_world(&state, req.world_id.as_deref().unwrap_or(DEFAULT_WORLD)).await?;
+    let limits = CompileLimits {
+        per_hour: state.config.compiles_per_hour,
+        blocked_per_day: BLOCKED_DESCRIPTIONS_PER_DAY,
+        per_day: state.config.compiles_per_day,
+        tokens_per_day: state.config.compile_tokens_per_day,
+    };
+    let by_hand = "Build the rules by hand instead.";
+    let call = match state.store.begin_llm_call(user.id, limits).await? {
+        CompileGate::Started(call) => call,
+        CompileGate::HourlyLimit => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_requests",
+                format!("You can compile {} descriptions an hour. Try again later, or edit the rules by hand.", limits.per_hour),
+            ))
+        }
+        CompileGate::Suspended => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "compile_suspended",
+                format!("Too many of your descriptions were not accepted today, so plain-English compile is closed to you for 24 hours. {by_hand}"),
+            ))
+        }
+        CompileGate::DailyCeiling => {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "compile_unavailable",
+                format!("Plain-English compile has reached its limit for today and opens again tomorrow. {by_hand}"),
+            ))
+        }
+    };
+    // Names the asker to the provider (so abuse can be traced to one of our users) without saying who they are.
+    let asker = &hash_token(&format!("lilanaya-user-{}", user.id))[..32];
+    let mut spent = Spent::default();
+    let outcome = strategies::compile(llm, &world, prompt, asker, &mut spent).await;
+    if let Err(e) = state.store.finish_llm_call(call, &spent).await {
+        eprintln!("compile: could not record call {call}: {e}");
+    }
+    match outcome {
         Ok(compiled) => {
             let s = &compiled.strategy;
             Ok(Json(json!({
@@ -287,9 +349,13 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
         Err(CompileError::NotAStrategy(message)) | Err(CompileError::Llm(LlmError::NoAnswer(message))) => {
             Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "not_compiled", message))
         }
+        Err(CompileError::Llm(LlmError::Blocked(verdict))) => {
+            eprintln!("compile: user {} blocked by the screen as {} ({:.2})", user.id, verdict.label, verdict.confidence);
+            Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "prompt_blocked", verdict.message()))
+        }
         Err(CompileError::Llm(LlmError::Unavailable(detail))) => {
             eprintln!("language model unavailable: {detail}");
-            Err(ApiError::new(StatusCode::BAD_GATEWAY, "compile_unavailable", "The language model could not be reached. Try again in a moment, or build the rules by hand."))
+            Err(ApiError::new(StatusCode::BAD_GATEWAY, "compile_unavailable", format!("Plain-English compile could not be reached. Try again in a moment, or build the rules by hand.")))
         }
     }
 }

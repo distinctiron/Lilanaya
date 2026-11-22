@@ -68,7 +68,7 @@ export async function profilePage({ navigate, refresh }) {
 						sectionHeading('Runs this month'),
 						h('p', null, [h('strong', null, `${usage.remaining} left`), ` · ${usage.used} of ${usage.monthly_runs} used`]),
 						h('div', { class: 'meter', role: 'img', 'aria-label': `${usage.used} of ${usage.monthly_runs} runs used` }, h('div', { style: { width: `${share * 100}%` } })),
-						h('p', { class: 'meta' }, `Month ${usage.period} · Resets on the 1st${usage.enforced ? '' : ' · The limit is not enforced yet'}`)
+						h('p', { class: 'meta' }, `Month ${usage.period} · Resets on the 1st · ${usage.max_active_runs} ${usage.max_active_runs === 1 ? 'run' : 'runs'} at a time`)
 					]),
 					h('div', { class: 'stack' }, [
 						sectionHeading('Your plan includes'),

@@ -9,8 +9,8 @@
 //! - no clock, no randomness, no modules, no I/O: nothing that could make two
 //!   runs of the same inputs differ.
 //!
-//! The interpreter runs inside the API process. That limits what code can do,
-//! but it is not a separate process or a WebAssembly boundary.
+//! Steps are not time: one step can be a slow built-in. The clock is kept by
+//! `isolate.rs`, which runs all of this in a child process it can stop.
 
 use lilanaya_engine::{Decider, View};
 use rquickjs::{Array, Context, Function, Object, Persistent, Runtime, Value};
@@ -18,7 +18,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 pub const MAX_SOURCE_BYTES: usize = 16 * 1024;
-const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+/// A strategy needs kilobytes. A small cap also keeps single steps cheap: a built-in can
+/// only be as slow as the values it works on are large.
+const MEMORY_LIMIT_BYTES: usize = 1024 * 1024;
 const STACK_LIMIT_BYTES: usize = 256 * 1024;
 /// The interpreter checks in about every 5,000 loop turns or calls (measured); each check is one tick.
 const LOAD_TICKS: u64 = 200;
@@ -153,7 +155,7 @@ fn explain(ctx: &rquickjs::Ctx<'_>, error: rquickjs::Error, out_of_steps: bool) 
     };
     let message: String = message.chars().take(200).collect();
     match message.as_str() {
-        "out of memory" => "ran out of memory (the limit is 16 MB)".into(),
+        "out of memory" => "ran out of memory (the limit is 1 MB)".into(),
         "stack overflow" | "Maximum call stack size exceeded" => "nested calls too deeply (is a function calling itself without end?)".into(),
         _ => message,
     }
@@ -219,6 +221,7 @@ mod tests {
         assert_eq!(message("while (true) {}"), "took too many steps (is there a loop that never ends?)", "also while loading");
         assert!(message("function decide() { return decide(); }").contains("nested calls too deeply"));
         assert!(message("function decide() { const a = []; while (true) a.push(new Array(1000).fill(7)); }").contains("memory"));
+        assert!(message("const S = 'a'.repeat(4000000); function decide() { return 'C'; }").contains("memory"), "large values cannot be built");
     }
 
     #[test]

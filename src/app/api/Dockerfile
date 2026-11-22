@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # --- runtime ---
 FROM debian:trixie-slim AS runtime
-# Root certificates: the object-storage client needs them to build its HTTPS client (and to reach a real S3).
+# Root certificates, for HTTPS to the AI gateway, the sign-in providers and the mail server.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/lilanaya-api /usr/local/bin/lilanaya-api
 USER nobody

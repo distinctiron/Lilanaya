@@ -1,4 +1,4 @@
-import { ApiError, postJson } from '../api.js';
+import { ApiError, getJson, postJson } from '../api.js';
 import { button, linkButton } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
@@ -29,6 +29,26 @@ function takeNext() {
 	}
 }
 
+// Why a sign-in through Google, Apple, Facebook or GitHub ended back here (`/sign-in?error=…`, set by the API).
+const PROVIDER_ERRORS = {
+	cancelled: 'Sign-in was cancelled. Nothing was changed.',
+	no_email: 'That account did not give us a verified email address, so we cannot tell who you are. Verify the address there, or sign in with a link by email.',
+	state_mismatch: 'That sign-in was started in another browser or took too long. Try again.',
+	provider_unavailable: 'That way of signing in is not switched on here. Use another one.',
+	provider_error: 'The other site did not confirm the sign-in. Try again, or sign in with a link by email.',
+	server_error: 'Something went wrong on the server. Try again.'
+};
+
+/** The providers that are switched on: [{ id, name }]. Sign-in by email works without them, so a failure here is not shown. */
+async function loadProviders() {
+	try {
+		return (await getJson('/api/auth/providers')).providers;
+	} catch (error) {
+		if (!(error instanceof ApiError)) console.error(error);
+		return [];
+	}
+}
+
 /** A notice for pages that need a signed-in user. */
 export function signInPrompt(what) {
 	return h('section', { class: 'stack' }, [
@@ -38,12 +58,16 @@ export function signInPrompt(what) {
 	]);
 }
 
-export async function signInPage({ query, navigate }) {
+export async function signInPage({ query, navigate, replaceUrl }) {
 	const next = safeNext(query.get('next'));
 	if (await getUser()) {
 		await navigate(next ?? '/profile');
 		return { title: 'Sign in', node: h('p', { class: 'meta' }, 'Signed in') };
 	}
+	const failure = query.get('error');
+	// Say it once: a refresh should not repeat the message.
+	if (failure) replaceUrl(next ? `/sign-in?next=${encodeURIComponent(next)}` : '/sign-in');
+	const providers = await loadProviders();
 
 	const email = h('input', { id: 'sign-in-email', name: 'email', type: 'email', autocomplete: 'email', required: true, 'aria-describedby': 'sign-in-hint' });
 	const errors = h('div', { class: 'error-box', role: 'alert', hidden: true });
@@ -90,7 +114,24 @@ export async function signInPage({ query, navigate }) {
 			h('div', null, submit)
 		]
 	);
-	section.append(sectionHeading('Sign in', { level: 1 }), form);
+	section.append(sectionHeading('Sign in', { level: 1 }));
+	if (failure) {
+		section.append(h('div', { class: 'error-box', role: 'alert' }, h('p', null, PROVIDER_ERRORS[failure] ?? PROVIDER_ERRORS.provider_error)));
+	}
+	if (providers.length > 0) {
+		// Plain links: the browser itself goes to the API, which sends it on to the provider and back.
+		const start = (id) => `/api/auth/${id}/start${next ? `?next=${encodeURIComponent(next)}` : ''}`;
+		section.append(
+			h('div', { class: 'stack' }, [
+				sectionHeading('With an account you have', { level: 2 }),
+				h('div', { class: 'row' }, providers.map((p) => linkButton(`Continue with ${p.name}`, start(p.id)))),
+				h('p', { class: 'meta' }, 'We receive your name and email address · Nothing is posted')
+			]),
+			h('div', { class: 'stack' }, [sectionHeading('Or with a link by email', { level: 2 }), form])
+		);
+	} else {
+		section.append(form);
+	}
 	return { title: 'Sign in', node: section };
 }
 

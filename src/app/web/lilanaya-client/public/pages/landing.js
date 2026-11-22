@@ -343,7 +343,7 @@ function classicsRanking() {
 				h('li', { class: 'rank-row' }, [
 					h('span', { class: 'px', 'aria-hidden': 'true' }, String(i + 1)),
 					avatarName(id, CLASSICS[id].name),
-					h('span', { class: 'rank-track', 'aria-hidden': 'true' }, h('span', { class: 'bar', style: `width: ${((average(id) / top) * 100).toFixed(1)}%` })),
+					h('span', { class: 'rank-track', 'aria-hidden': 'true' }, h('span', { class: 'bar', style: { width: `${((average(id) / top) * 100).toFixed(1)}%` } })),
 					h('span', { class: 'rank-score' }, average(id).toFixed(2))
 				])
 			)),

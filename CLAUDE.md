@@ -13,16 +13,19 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 ## Commands
 
 - Dev: `docker compose up --build` — web http://localhost:3000, API http://localhost:8080/api/health, caught emails (sign-in links) http://localhost:8025
-- Production-like: `docker compose -f compose.prod.yaml up --build` — http://localhost:3000
-- Rust tests: `docker compose run --rm api cargo test` (starts Postgres and the S3 store; each API test uses its own schema and key prefix)
+- Production-like: `docker compose -f compose.prod.yaml up --build` — http://localhost:3000 (needs `POSTGRES_PASSWORD`)
+- Production: Render, described by `render.yaml`. The API and the worker are the same image with `ROLE=api` and `ROLE=worker`; `APP_ENV=production` makes it refuse to start without https and a mail server.
+- Rust tests: `docker compose run --rm api cargo test` (starts Postgres; each API test uses its own schema)
 - Golden files: if the engine's output changes on purpose, regenerate with `docker compose run --rm -e UPDATE_GOLDEN=1 api cargo test -p lilanaya-engine --test golden` and review the diff
 
 ## Layout
 
 - `src/engine` (`lilanaya-engine`): pure simulation engine, no I/O. World model, FSM strategies, schedules, KPIs.
-- `src/app/api` (`lilanaya-api`): axum routes, Postgres store (sqlx, runtime queries, migrations in `migrations/`), background run worker (the `runs` table is the job queue), run artifacts in S3-compatible storage (`artifacts.rs`, `object_store` crate; configured by `S3_*` in the compose files).
+- `src/app/api` (`lilanaya-api`): axum routes, Postgres store (sqlx, runtime queries, migrations in `migrations/`), background run worker (the `runs` table is the job queue), a run's downloadable files built on request from the database (`artifacts.rs`; nothing is stored).
   - Accounts: `auth.rs` (session cookie, `User` / `Viewer` extractors), `mail.rs`, `routes/account.rs`.
-  - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `llm.rs` (raw HTTP; Claude through the Claude API for development, an Azure OpenAI deployment through the Responses API for production), `routes/authoring.rs`.
+  - Sign-in through Google, Apple, Facebook, GitHub: `oauth.rs` (the providers; each is behind its own flag, `GOOGLE_SIGN_IN`, `APPLE_SIGN_IN`, `FACEBOOK_SIGN_IN`, `GITHUB_SIGN_IN`, off unless set to `on`, and one that is on must have its credentials in the environment, see `.env.example`), `routes/federated.rs` (browser redirects under `/api/auth/{provider}/…`; failures land on `/sign-in?error=<code>`). An outside account is tied to a user in `user_identities`; a new one joins the user with the same verified address.
+  - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `isolate.rs` (runs previews and runs in a child process with a time limit), `llm.rs` (raw HTTP to Vercel AI Gateway, Chat Completions), `guard.rs` (Jev, the screen in front of every model call, through the gateway's Decisions API), `routes/authoring.rs`.
+  - Limits: `config.rs` (the numbers, from the environment), `store.rs` (each limit is counted and written under an advisory lock, so requests arriving together cannot all pass).
 - `src/app/web/lilanaya-client/public`: `pages/` (one module per screen; `landing.js` is the home page at `/`, where a visitor plays five rounds by hand before anything is explained; `how-it-works.js` holds the narrated films), `components/` (`avatar.js` draws a strategy's avatar from its id, `film.js` plays the narrated step-by-step films, `scene.js` is their pausable clock, `pocket-dilemma.js` the small Prisoner's Dilemma both pages play in the browser), `router.js`, `api.js`, `session.js` (who is signed in), `dom.js`, `style.css`.
 
 ## Conventions
@@ -32,6 +35,8 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 - API errors always have the shape `{"error": {"code", "message", "details"?}}`. `POST /api/runs` answers 202 with a queued run; clients poll `GET /api/runs/{id}`.
 - Anything a user creates has an owner. A private strategy or run answers 404 (not 403) to everyone else and is left out of lists and world analytics. Handlers that write take `User` (401 when signed out); handlers that read take `Viewer`.
 - Settings read from the environment treat an empty value as unset (compose passes unset variables as empty strings). Secrets go in `.env`, never in the compose files.
-- Code strategies must stay deterministic: the sandbox has no clock or randomness, and its limits are counted in interpreter steps, not time.
+- Code strategies must stay deterministic: the sandbox has no clock or randomness, and its limits are counted in interpreter steps, not time. The one clock is outside it: `isolate.rs` stops a child process that runs too long. That fails the job ("stopped by the server"); it never decides a match.
+- Nothing a user wrote is executed in the API process: previews, saves and runs go through `isolate.rs`.
+- No text reaches the language model without passing the screen: `Llm::complete` is the only way to the model and screens on every call. If the screen cannot be reached, the call is refused.
 - Determinism is non-negotiable: every run is reproducible from its recorded seed. No wall-clock time, unseeded randomness, or hash-map iteration order in the engine.
 - The name is "Lilanaya" (not "Lilanyaya").

@@ -5,7 +5,7 @@ use crate::error::ApiError;
 use crate::worker::AppState;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
@@ -46,17 +46,21 @@ pub fn session_cookie(token: Option<&str>, secure: bool) -> String {
     format!("{SESSION_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{}", if secure { "; Secure" } else { "" })
 }
 
-/// The session token the request carries, if any.
-pub fn session_token(parts: &Parts) -> Option<String> {
-    parts
-        .headers
+/// The value of the cookie called `name`, if the request carries one.
+pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(name, value)| *name == SESSION_COOKIE && !value.is_empty())
+        .find(|(n, value)| *n == name && !value.is_empty())
         .map(|(_, value)| value.to_string())
+}
+
+/// The session token the request carries, if any.
+pub fn session_token(parts: &Parts) -> Option<String> {
+    cookie(&parts.headers, SESSION_COOKIE)
 }
 
 /// Whoever is asking: a signed-in user, or nobody.
