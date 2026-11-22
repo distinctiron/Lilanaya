@@ -38,11 +38,12 @@ services:
     envVars:
       - key: PORT
         value: "80"
+      # Where the website finds the API on the private network: the API service's name and
+      # the PORT it is given below. Written out, not taken from the service with `fromService`:
+      # that value is worked out when the Blueprint is synced, from the API's settings before
+      # the sync, so after a port change it stays one sync behind.
       - key: API_HOSTPORT
-        fromService:
-          type: pserv
-          name: lilanaya-api
-          property: hostport
+        value: lilanaya-api:8080
 
   # The API: answers requests. Not reachable from the internet.
   - type: pserv
@@ -56,9 +57,7 @@ services:
       - fromGroup: lilanaya-shared
       - key: ROLE
         value: api
-      # The port the API listens on. Render builds the address it gives the website
-      # (`hostport`, above) from this value, so the two always agree. Changing it means
-      # syncing the Blueprint and then deploying the website again.
+      # The port the API listens on. Keep it the same as in API_HOSTPORT above.
       - key: PORT
         value: "8080"
       - key: DATABASE_URL
