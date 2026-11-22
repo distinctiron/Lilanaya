@@ -12,12 +12,31 @@ server {
     root /usr/share/nginx/html;
     server_tokens off;
 
-    # Behind a host's proxy (private addresses only) the client's own address arrives in
-    # X-Forwarded-For; the limits above must count that one, not the proxy's.
+    # The limits above must count the visitor's own address, which arrives in X-Forwarded-For.
+    # Between the visitor and this server are the host's proxies: Render's private network and
+    # Cloudflare (Render's own, and ours when the domain is proxied). Their addresses are
+    # skipped; the last address in the header that is not one of theirs is the visitor's. A
+    # visitor cannot fake it: whatever they put in the header, Cloudflare adds their real
+    # address after it. Ranges: https://www.cloudflare.com/ips/
     set_real_ip_from 10.0.0.0/8;
     set_real_ip_from 172.16.0.0/12;
     set_real_ip_from 192.168.0.0/16;
     set_real_ip_from 100.64.0.0/10;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 131.0.72.0/22;
     real_ip_header X-Forwarded-For;
     real_ip_recursive on;
 

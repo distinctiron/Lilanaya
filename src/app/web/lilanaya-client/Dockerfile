@@ -6,6 +6,7 @@ ENV API_HOSTPORT=api:8080
 # Makes the image's start-up script put the container's DNS servers in NGINX_LOCAL_RESOLVERS.
 ENV NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 COPY security-headers.conf /etc/nginx/security-headers.conf
+COPY 16-api-address.envsh /docker-entrypoint.d/16-api-address.envsh
 COPY default.conf.template /etc/nginx/templates/default.conf.template
 COPY public /usr/share/nginx/html
 EXPOSE 80

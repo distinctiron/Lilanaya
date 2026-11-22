@@ -1,0 +1,23 @@
+#!/bin/sh
+# Sourced by the nginx image's start-up script, before the config template is filled in.
+#
+# nginx looks the API up by itself on every request (see the template), and its own
+# resolver does not try the search domains in /etc/resolv.conf. On a host where the API's
+# short name only resolves with one of them (Render's private network), nginx would answer
+# "host not found". So: if the short name needs a search domain, spell the name out in full.
+# In Docker Compose the short name resolves as it is, and nothing changes.
+
+api_host="${API_HOSTPORT%%:*}"
+api_port="${API_HOSTPORT##*:}"
+case "$api_host" in
+    *.*) ;; # already a full name or an address
+    *)
+        for domain in $(awk '$1 == "search" { for (i = 2; i <= NF; i++) print $i }' /etc/resolv.conf); do
+            if nslookup "$api_host.$domain" >/dev/null 2>&1; then
+                export API_HOSTPORT="$api_host.$domain:$api_port"
+                echo "16-api-address.envsh: the API is reached as $API_HOSTPORT"
+                break
+            fi
+        done
+        ;;
+esac
