@@ -78,13 +78,17 @@ fn production_problems(config: &config::Config, mailer: &mail::Mailer, serves_re
 
 #[tokio::main]
 async fn serve() {
-    let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    // Where to listen: `BIND_ADDR` if given; otherwise every address, on the port the host
+    // names in `PORT` (Render does) or 8080.
+    let set = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+    let addr = set("BIND_ADDR").unwrap_or_else(|| format!("0.0.0.0:{}", set("PORT").unwrap_or_else(|| "8080".into())));
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set (see compose.yaml)");
     let (serves_requests, runs_worker) = roles().unwrap_or_else(|e| panic!("{e}"));
     let production = std::env::var("APP_ENV").is_ok_and(|v| v.trim() == "production");
 
     let config = config::Config::from_env().unwrap_or_else(|e| panic!("{e}"));
-    let mailer = mail::Mailer::from_env().unwrap_or_else(|e| panic!("{e}"));
+    // The worker sends no mail, so it needs no mail server (and should not report a missing one).
+    let mailer = if serves_requests { mail::Mailer::from_env().unwrap_or_else(|e| panic!("{e}")) } else { mail::Mailer::Log };
     if production {
         let problems = production_problems(&config, &mailer, serves_requests);
         if !problems.is_empty() {
