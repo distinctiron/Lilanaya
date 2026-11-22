@@ -7,7 +7,7 @@ import { pager } from '../components/pager.js';
 import { screen, screenGroup, screens } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h, prefersReducedMotion } from '../dom.js';
-import { getUser, signInUrl } from '../session.js';
+import { getUser, signUpUrl } from '../session.js';
 
 const BLOCK_MS = 30; // one block of a new strategy's avatar
 
@@ -77,7 +77,7 @@ export async function strategiesPage(ctx) {
 	const intro = h('div', { class: 'stack' }, [
 		sectionHeading('Strategies', { level: 1 }),
 		h('p', { class: 'prose' }, 'A strategy decides what to play each round from what has happened so far. Most are rules: a few states, one decision per state, and conditions for moving between them. A strategy can also be written as code. Open a strategy to see how it works.'),
-		h('p', null, user ? linkButton('New strategy', '/strategies/new', { primary: true }) : linkButton('Sign in to make your own', signInUrl('/strategies/new'))),
+		h('p', null, user ? linkButton('New strategy', '/strategies/new', { primary: true }) : linkButton('Sign up to make your own', signUpUrl('/strategies/new'))),
 		user && !mine.length ? h('p', { class: 'meta' }, 'You have no strategies yet') : null
 	]);
 	const groups = [

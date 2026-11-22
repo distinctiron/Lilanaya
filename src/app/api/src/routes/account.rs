@@ -1,6 +1,7 @@
 //! Sign-in by emailed link, the session, and what the signed-in user is entitled to.
 
 use super::{parse_json, ApiResult, Shared};
+use crate::config::Allowance;
 use crate::auth::{hash_token, new_token, session_cookie, session_token, User, Viewer, SIGN_IN_LINK_MINUTES};
 use crate::error::ApiError;
 use crate::worker::AppState;
@@ -20,6 +21,18 @@ pub(super) const MAX_DISPLAY_NAME_CHARS: usize = 60;
 #[serde(deny_unknown_fields)]
 struct EmailBody {
     email: String,
+    /// What the visitor asked for. Left out, it is a sign-up.
+    #[serde(default)]
+    intent: Intent,
+}
+
+/// Signing up makes the account if there is none; logging in never makes one.
+#[derive(Deserialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Intent {
+    #[default]
+    SignUp,
+    LogIn,
 }
 
 /// Lower-cased address if it looks like one. The real check is that the link arrives.
@@ -36,21 +49,32 @@ pub(super) fn normalise_email(raw: &str) -> Option<String> {
     plausible.then_some(email)
 }
 
-/// Emails a one-time sign-in link. Answers 202 whether or not the address has an account.
+/// Emails a one-time link that logs the visitor in. Answers 202 whether or not the address has an account:
+/// someone who asks to log in with an address that has none is told so in the email, not on the page,
+/// so the page cannot be used to find out who has an account.
 pub async fn request_link(State(state): Shared, body: Result<Bytes, BytesRejection>) -> Result<(StatusCode, Json<Value>), ApiError> {
     let req: EmailBody = parse_json(body)?;
     let Some(email) = normalise_email(&req.email) else {
         return Err(ApiError::invalid("Enter a valid email address", vec![lilanaya_engine::Issue::new("email", "is not a valid email address")]));
     };
     let token = new_token();
+    // Counted against the address's limit whichever email goes out.
     if !state.store.create_sign_in_token(&email, &hash_token(&token)).await? {
-        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "too_many_requests", "Too many sign-in links were asked for this address. Try again in 15 minutes."));
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "too_many_requests", "Too many links were asked for this address. Try again in 15 minutes."));
     }
-    let link = format!("{}/sign-in/confirm?token={token}", state.config.public_url);
-    let text = format!(
-        "Open this link to sign in to Lilanaya:\n\n{link}\n\nIt works once and for {SIGN_IN_LINK_MINUTES} minutes. If you did not ask for it, ignore this email: nobody can sign in without the link.\n"
-    );
-    state.mailer.send(&email, "Your Lilanaya sign-in link", &text).await.map_err(|e| ApiError::internal(format!("send sign-in email: {e}")))?;
+    let site = &state.config.public_url;
+    let known = state.store.user_exists(&email).await?;
+    let (subject, text) = if req.intent == Intent::LogIn && !known {
+        (
+            "No Lilanaya account for this address yet",
+            format!("Someone asked to log in to Lilanaya with this address, but it has no account.\n\nTo make one, sign up here:\n\n{site}/sign-up\n\nIf that was not you, ignore this email: nothing was changed.\n"),
+        )
+    } else {
+        let link = format!("{site}/log-in/confirm?token={token}");
+        let (subject, what) = if known { ("Your Lilanaya log-in link", "log in to Lilanaya") } else { ("Finish signing up to Lilanaya", "finish signing up to Lilanaya") };
+        (subject, format!("Open this link to {what}:\n\n{link}\n\nIt works once and for {SIGN_IN_LINK_MINUTES} minutes. If you did not ask for it, ignore this email: nobody can get in without the link.\n"))
+    };
+    state.mailer.send(&email, subject, &text).await.map_err(|e| ApiError::internal(format!("send log-in email: {e}")))?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true, "expires_in_minutes": SIGN_IN_LINK_MINUTES }))))
 }
 
@@ -60,11 +84,11 @@ struct ConfirmBody {
     token: String,
 }
 
-/// Trades the token from the emailed link for a session cookie; creates the user on first sign-in.
+/// Trades the token from the emailed link for a session cookie; creates the user if this is a sign-up.
 pub async fn confirm_link(State(state): Shared, body: Result<Bytes, BytesRejection>) -> Result<Response, ApiError> {
     let req: ConfirmBody = parse_json(body)?;
     let Some(email) = state.store.consume_sign_in_token(&hash_token(req.token.trim())).await? else {
-        return Err(ApiError::bad_request("invalid_token", "This sign-in link has expired or was already used. Ask for a new one."));
+        return Err(ApiError::bad_request("invalid_token", "This link has expired or was already used. Ask for a new one."));
     };
     let default_name: String = email.split('@').next().unwrap_or("player").chars().take(MAX_DISPLAY_NAME_CHARS).collect();
     let user = state.store.upsert_user(&email, &default_name).await?;
@@ -123,6 +147,19 @@ pub async fn usage(State(state): Shared, user: User) -> ApiResult {
     Ok(Json(usage_json(&state, &user).await?))
 }
 
+/// What each plan includes, for the sign-up page. Public: it says nothing about any user.
+pub async fn plans(State(state): Shared) -> ApiResult {
+    let config = &state.config;
+    let plan = |name: &str| {
+        let (limit, per) = match config.ai_allowance(name) {
+            Allowance::PerWorld(n) => (n, "world"),
+            Allowance::PerMonth(n) => (n, "month"),
+        };
+        json!({ "ai_requests": { "limit": limit, "per": per }, "monthly_runs": config.monthly_runs(name), "max_active_runs": config.max_active_runs })
+    };
+    Ok(Json(json!({ "free": plan("free"), "subscriber": plan("subscriber") })))
+}
+
 /// What the plan unlocks. No billing yet: the plan is set by hand in the database.
 fn entitlements_json(user: &User) -> Value {
     let subscriber = user.plan == "subscriber";
@@ -133,7 +170,16 @@ fn entitlements_json(user: &User) -> Value {
 async fn usage_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
     let (period, used) = state.store.runs_this_month(user.id).await?;
     let monthly = state.config.monthly_runs(&user.plan);
-    Ok(json!({ "period": period, "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": true, "max_active_runs": state.config.max_active_runs }))
+    // AI requests: `per` is "world" (that many in each world, for good) or "month" (that many a month, across worlds).
+    let (by_world, this_month) = state.store.ai_requests_used(user.id).await?;
+    let (limit, per) = match state.config.ai_allowance(&user.plan) {
+        Allowance::PerWorld(n) => (n, "world"),
+        Allowance::PerMonth(n) => (n, "month"),
+    };
+    Ok(json!({
+        "period": period, "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": true, "max_active_runs": state.config.max_active_runs,
+        "ai_requests": { "limit": limit, "per": per, "used_by_world": by_world, "used_this_month": this_month },
+    }))
 }
 
 async fn me_json(state: &AppState, user: &User) -> Result<Value, ApiError> {

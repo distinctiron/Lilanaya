@@ -3,7 +3,7 @@
 
 use super::{find_world, parse_json, ApiResult, Shared};
 use crate::auth::{hash_token, new_token, User, Viewer};
-use crate::config::BLOCKED_DESCRIPTIONS_PER_DAY;
+use crate::config::{Allowance, BLOCKED_DESCRIPTIONS_PER_DAY};
 use crate::error::ApiError;
 use crate::isolate::{self, Failure};
 use crate::llm::{LlmError, Spent};
@@ -20,7 +20,9 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 const DEFAULT_WORLD: &str = "prisoners-dilemma";
-const MAX_OWN_STRATEGIES: i64 = 100;
+/// A stop against filling the database, far above what a person writes. It is not a plan limit:
+/// those are on AI requests (`Config::ai_allowance`).
+const MAX_OWN_STRATEGIES: i64 = 1000;
 
 /// The stored document plus who owns it and whether the viewer does.
 fn strategy_json(row: &StrategyRow, viewer: Option<i64>) -> Value {
@@ -298,10 +300,18 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
         blocked_per_day: BLOCKED_DESCRIPTIONS_PER_DAY,
         per_day: state.config.compiles_per_day,
         tokens_per_day: state.config.compile_tokens_per_day,
+        allowance: state.config.ai_allowance(&user.plan),
     };
     let by_hand = "Build the rules by hand instead.";
-    let call = match state.store.begin_llm_call(user.id, limits).await? {
+    let call = match state.store.begin_llm_call(user.id, &world.id, limits).await? {
         CompileGate::Started(call) => call,
+        CompileGate::AllowanceUsed => {
+            let message = match limits.allowance {
+                Allowance::PerWorld(n) => format!("The free plan includes {n} AI requests per world, and you have used them all in this one. They do not come back. You can still build rules by hand or write the strategy in code, as often as you like."),
+                Allowance::PerMonth(n) => format!("Your plan includes {n} AI requests a month, and you have used them all. They come back on the 1st. You can still build rules by hand or write the strategy in code, as often as you like."),
+            };
+            return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "ai_limit_reached", message));
+        }
         CompileGate::HourlyLimit => {
             return Err(ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
@@ -328,7 +338,10 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
     let asker = &hash_token(&format!("lilanaya-user-{}", user.id))[..32];
     let mut spent = Spent::default();
     let outcome = strategies::compile(llm, &world, prompt, asker, &mut spent).await;
-    if let Err(e) = state.store.finish_llm_call(call, &spent).await {
+    // The request is used up once the language model has been asked, whatever it answered: that is what is paid for.
+    // It is given back only when the model was never reached.
+    let counted = !matches!(outcome, Err(CompileError::Llm(LlmError::Blocked(_) | LlmError::Unavailable(_))));
+    if let Err(e) = state.store.finish_llm_call(call, &spent, counted).await {
         eprintln!("compile: could not record call {call}: {e}");
     }
     match outcome {

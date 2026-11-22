@@ -3,13 +3,13 @@
 //! Runs and previews start child processes (`isolate.rs`), as they do in the real program.
 
 use super::*;
-use crate::config::Config;
+use crate::config::{Allowance, Config};
 use crate::llm::tests::{completion, verdict, FakeApi};
 use crate::llm::Llm;
 use crate::mail::{Mailer, Sent};
 use crate::oauth::tests::{id_token, TEST_CLIENT_ID, TEST_SECRET};
 use crate::oauth::OAuth;
-use crate::store::Store;
+use crate::store::{CompileGate, CompileLimits, Store};
 use crate::worker;
 use axum::body::Body;
 use axum::http::{Method, Request};
@@ -608,7 +608,7 @@ async fn sign_in_by_emailed_link_then_sign_out() {
         let mail = app.mail.lock().unwrap();
         let sent = mail.last().unwrap();
         assert_eq!(sent.to, "grace@example.com");
-        assert!(sent.body.contains("http://localhost:3000/sign-in/confirm?token="), "{}", sent.body);
+        assert!(sent.body.contains("http://localhost:3000/log-in/confirm?token="), "{}", sent.body);
     }
     let token = app.emailed_token();
     assert_eq!(token.len(), 64);
@@ -690,6 +690,55 @@ async fn usage_and_entitlements_follow_the_user() {
 }
 
 // --- strategy authoring ---
+
+#[tokio::test]
+async fn logging_in_never_makes_an_account_and_signing_up_does() {
+    let app = TestApp::new().await;
+    let anon = app.anonymous();
+    let latest = || {
+        let mail = app.mail.lock().unwrap();
+        let sent = mail.last().unwrap();
+        (sent.subject.clone(), sent.body.clone())
+    };
+
+    // Logging in with an address that has no account: the page is told the same, the email says there is no account.
+    let (status, body) = anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": "log_in" })).await;
+    assert_eq!((status, &body), (StatusCode::ACCEPTED, &json!({ "sent": true, "expires_in_minutes": 15 })));
+    let (subject, text) = latest();
+    assert_eq!(subject, "No Lilanaya account for this address yet");
+    assert!(text.contains("http://localhost:3000/sign-up") && !text.contains("token="), "{text}");
+
+    // Signing up sends the link, and using it makes the account.
+    assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": "sign_up" })).await.0, StatusCode::ACCEPTED);
+    assert_eq!(latest().0, "Finish signing up to Lilanaya");
+    let (status, me) = anon.post("/api/auth/email/confirm", json!({ "token": app.emailed_token() })).await;
+    assert_eq!((status, me["email"].as_str()), (StatusCode::OK, Some("new@example.com")));
+
+    // From then on both ways send a log-in link.
+    for intent in ["log_in", "sign_up"] {
+        assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": intent })).await.0, StatusCode::ACCEPTED);
+        let (subject, text) = latest();
+        assert_eq!(subject, "Your Lilanaya log-in link");
+        assert!(text.contains("http://localhost:3000/log-in/confirm?token="), "{text}");
+    }
+    assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": "browse" })).await.0, StatusCode::BAD_REQUEST);
+    app.close().await;
+}
+
+#[tokio::test]
+async fn the_plans_are_public() {
+    let app = TestApp::new().await;
+    let (status, plans) = app.anonymous().get("/api/plans").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        plans,
+        json!({
+            "free": { "ai_requests": { "limit": 3, "per": "world" }, "monthly_runs": 100, "max_active_runs": 2 },
+            "subscriber": { "ai_requests": { "limit": 20, "per": "month" }, "monthly_runs": 1000, "max_active_runs": 2 },
+        })
+    );
+    app.close().await;
+}
 
 // --- sign-in through Google, Apple, Facebook, GitHub ---
 
@@ -813,14 +862,14 @@ async fn only_providers_with_credentials_are_offered() {
     let app = TestApp::new().await;
     assert_eq!(app.anonymous().get("/api/auth/providers").await, (StatusCode::OK, json!({ "providers": [] })));
     let (status, headers, _) = app.anonymous().send(Method::GET, "/api/auth/google/start?next=/runs", None).await;
-    assert_eq!((status, location(&headers).as_str()), (StatusCode::SEE_OTHER, "/sign-in?error=provider_unavailable&next=%2Fruns"));
+    assert_eq!((status, location(&headers).as_str()), (StatusCode::SEE_OTHER, "/log-in?error=provider_unavailable&next=%2Fruns"));
     app.close().await;
 
     let (app, _, _) = app_with_fake_providers().await;
     let (_, body) = app.anonymous().get("/api/auth/providers").await;
     assert_eq!(body, json!({ "providers": [{ "id": "google", "name": "Google" }, { "id": "apple", "name": "Apple" }, { "id": "facebook", "name": "Facebook" }, { "id": "github", "name": "GitHub" }] }));
     let (status, headers, _) = app.anonymous().send(Method::GET, "/api/auth/myspace/start", None).await;
-    assert_eq!((status, location(&headers).as_str()), (StatusCode::SEE_OTHER, "/sign-in?error=provider_unavailable"));
+    assert_eq!((status, location(&headers).as_str()), (StatusCode::SEE_OTHER, "/log-in?error=provider_unavailable"));
     app.close().await;
 }
 
@@ -894,7 +943,7 @@ async fn an_unverified_address_does_not_sign_anyone_in() {
         // Someone claims ada's address at the provider without having proved it is theirs.
         fake.approve_as(json!({ "sub": "666", "email": "ada@example.com", "email_verified": false, "name": "Not Ada" }));
         let (to, browser) = app.federated(provider, "?next=/runs").await;
-        assert_eq!(to, "/sign-in?error=no_email&next=%2Fruns", "{provider}");
+        assert_eq!(to, "/log-in?error=no_email&next=%2Fruns", "{provider}");
         assert!(browser.is_none(), "{provider}");
     }
     app.close().await;
@@ -914,19 +963,19 @@ async fn the_answer_must_come_back_to_the_browser_that_asked() {
 
     // Another browser (no cookie), a made-up state, or the answer of another provider: refused before the provider is asked anything.
     let good = format!("code=good-code&state={state}");
-    assert_eq!(ends_at(app.anonymous().send(Method::GET, &callback("google", good.clone()), None).await), "/sign-in?error=state_mismatch");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("code=good-code&state={}", "0".repeat(64))), None).await), "/sign-in?error=state_mismatch");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", "code=good-code".into()), None).await), "/sign-in?error=state_mismatch");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("github", good.clone()), None).await), "/sign-in?error=state_mismatch");
+    assert_eq!(ends_at(app.anonymous().send(Method::GET, &callback("google", good.clone()), None).await), "/log-in?error=state_mismatch");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("code=good-code&state={}", "0".repeat(64))), None).await), "/log-in?error=state_mismatch");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", "code=good-code".into()), None).await), "/log-in?error=state_mismatch");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("github", good.clone()), None).await), "/log-in?error=state_mismatch");
     assert!(fake.seen.lock().unwrap().is_empty());
 
     // Pressing Cancel at the provider, a provider error, and a code the provider refuses.
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("error=access_denied&state={state}")), None).await), "/sign-in?error=cancelled");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("error=server_error&state={state}")), None).await), "/sign-in?error=provider_error");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("state={state}")), None).await), "/sign-in?error=provider_error");
-    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("code=stale&state={state}")), None).await), "/sign-in?error=provider_error");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("error=access_denied&state={state}")), None).await), "/log-in?error=cancelled");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("error=server_error&state={state}")), None).await), "/log-in?error=provider_error");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("state={state}")), None).await), "/log-in?error=provider_error");
+    assert_eq!(ends_at(browser.send(Method::GET, &callback("google", format!("code=stale&state={state}")), None).await), "/log-in?error=provider_error");
     let (github, github_state, _) = app.start_federated("github", "").await;
-    assert_eq!(ends_at(github.send(Method::GET, &callback("github", format!("code=stale&state={github_state}")), None).await), "/sign-in?error=provider_error");
+    assert_eq!(ends_at(github.send(Method::GET, &callback("github", format!("code=stale&state={github_state}")), None).await), "/log-in?error=provider_error");
 
     // The real answer works, and "next" pointing at another site was dropped.
     let (status, headers, _) = browser.send(Method::GET, &callback("google", good), None).await;
@@ -960,7 +1009,7 @@ async fn apple_posts_its_answer_and_is_passed_on_to_the_ordinary_callback() {
     let (browser, state, _) = app.start_federated("apple", "").await;
     let (_, headers, _) = app.anonymous().raw(Method::POST, "/api/auth/apple/callback", Some("application/x-www-form-urlencoded"), Some(format!("error=user_cancelled_authorize&state={state}"))).await;
     let (_, headers, _) = browser.send(Method::GET, &location(&headers), None).await;
-    assert_eq!(location(&headers), "/sign-in?error=cancelled");
+    assert_eq!(location(&headers), "/log-in?error=cancelled");
     app.close().await;
 }
 
@@ -1313,6 +1362,99 @@ async fn a_description_the_screen_turns_down_never_reaches_the_model() {
     api.say(GRIM_JSON);
     let bob = app.signed_in_as("bob@example.com").await;
     assert_eq!(bob.post("/api/strategies/compile", json!({ "prompt": "Cooperate until betrayed, then defect for ever." })).await.0, StatusCode::OK);
+    app.close().await;
+}
+
+#[tokio::test]
+async fn a_free_plan_has_three_ai_requests_per_world_for_good() {
+    let api = FakeApi::default();
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
+    let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
+    let ai = |usage: Value| usage["ai_requests"].clone();
+    assert_eq!(ai(app.get("/api/usage").await.1), json!({ "limit": 3, "per": "world", "used_by_world": {}, "used_this_month": 0 }));
+
+    // Not used up: a description the screen turns down, and a provider that does not answer.
+    api.judge(200, verdict("instructions_to_the_ai", 0.01));
+    assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.1["error"]["code"], "prompt_blocked");
+    api.reply(500, json!({ "error": "down" })).reply(500, json!({ "error": "down" })).reply(500, json!({ "error": "down" }));
+    assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.1["error"]["code"], "compile_unavailable");
+    assert_eq!(ai(app.get("/api/usage").await.1)["used_by_world"], json!({}));
+
+    // Used up: every time the model is asked, also when it says the description is no strategy.
+    api.say(GRIM_JSON).say(r#"{"error": "This describes a pancake recipe, not a strategy."}"#).say(GRIM_JSON);
+    let (status, first) = app.post("/api/strategies/compile", prompt.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.1["error"]["code"], "not_compiled");
+    assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.0, StatusCode::OK);
+    assert_eq!(ai(app.get("/api/usage").await.1)["used_by_world"], json!({ "prisoners-dilemma": 3 }));
+    let asked = api.seen.lock().unwrap().len();
+
+    // The fourth is refused before anything is sent, and saving then deleting a strategy gives nothing back.
+    let refused = |(status, body): (StatusCode, Value)| {
+        assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("ai_limit_reached")), "{body}");
+        assert!(body["error"]["message"].as_str().unwrap().contains("do not come back"), "{body}");
+    };
+    refused(app.post("/api/strategies/compile", prompt.clone()).await);
+    let (status, saved) = app.post("/api/strategies", grudger(json!({ "prompt": "Cooperate until betrayed, then defect for ever." }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(app.call(Method::DELETE, &format!("/api/strategies/{}", saved["id"].as_str().unwrap()), None).await.0, StatusCode::OK);
+    refused(app.post("/api/strategies/compile", prompt.clone()).await);
+    assert_eq!(api.seen.lock().unwrap().len(), asked, "a refused request is not sent");
+
+    // Rules by hand and code are not AI requests: they still save.
+    assert_eq!(app.post("/api/strategies", grudger(json!({}))).await.0, StatusCode::CREATED);
+    assert_eq!(app.post("/api/strategies", json!({ "name": "Coded", "mode": "code", "source": "function decide() { return 'C'; }" })).await.0, StatusCode::CREATED);
+
+    // The three belong to one user and one world.
+    let bob = app.signed_in_as("bob@example.com").await;
+    api.say(GRIM_JSON);
+    assert_eq!(bob.post("/api/strategies/compile", prompt.clone()).await.0, StatusCode::OK);
+    let me = app.get("/api/me").await.1["id"].as_i64().unwrap();
+    let limits = |allowance| CompileLimits { per_hour: 50, blocked_per_day: 5, per_day: 500, tokens_per_day: 2_000_000, allowance };
+    assert_eq!(app.store.begin_llm_call(me, "prisoners-dilemma", limits(Allowance::PerWorld(3))).await.unwrap(), CompileGate::AllowanceUsed);
+    assert!(matches!(app.store.begin_llm_call(me, "another-world", limits(Allowance::PerWorld(3))).await.unwrap(), CompileGate::Started(_)));
+    app.close().await;
+}
+
+#[tokio::test]
+async fn a_subscriber_has_twenty_ai_requests_a_month_across_worlds() {
+    let api = FakeApi::default();
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, subscriber_ai_requests_per_month: 4, ..Config::for_tests() }).await;
+    let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
+    let me = app.get("/api/me").await.1["id"].as_i64().unwrap();
+    app.store.set_plan(me, "subscriber").await.unwrap();
+    for _ in 0..4 {
+        api.say(GRIM_JSON);
+        assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.0, StatusCode::OK);
+    }
+    assert_eq!(app.get("/api/usage").await.1["ai_requests"], json!({ "limit": 4, "per": "month", "used_by_world": { "prisoners-dilemma": 4 }, "used_this_month": 4 }));
+    let (status, body) = app.post("/api/strategies/compile", prompt.clone()).await;
+    assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("ai_limit_reached")), "{body}");
+    assert!(body["error"]["message"].as_str().unwrap().contains("on the 1st"), "{body}");
+    // The month's number covers every world.
+    let limits = CompileLimits { per_hour: 50, blocked_per_day: 5, per_day: 500, tokens_per_day: 2_000_000, allowance: Allowance::PerMonth(4) };
+    assert_eq!(app.store.begin_llm_call(me, "another-world", limits).await.unwrap(), CompileGate::AllowanceUsed);
+    assert_eq!(Config::for_tests().subscriber_ai_requests_per_month, 20);
+    app.close().await;
+}
+
+#[tokio::test]
+async fn ai_requests_arriving_together_do_not_get_past_the_allowance() {
+    let api = FakeApi::default();
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
+    for _ in 0..8 {
+        api.say(GRIM_JSON);
+    }
+    let attempts: Vec<_> = (0..8).map(|_| {
+        let app = app.clone();
+        tokio::spawn(async move { app.post("/api/strategies/compile", json!({ "prompt": "Cooperate until betrayed, then defect for ever." })).await.0 })
+    }).collect();
+    let mut answers = Vec::new();
+    for attempt in attempts {
+        answers.push(attempt.await.unwrap());
+    }
+    let count = |status: StatusCode| answers.iter().filter(|a| **a == status).count();
+    assert_eq!((count(StatusCode::OK), count(StatusCode::TOO_MANY_REQUESTS)), (3, 5), "{answers:?}");
     app.close().await;
 }
 

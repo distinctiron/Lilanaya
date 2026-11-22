@@ -49,6 +49,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/auth/providers", get(federated::providers))
         .route("/api/auth/{provider}/start", get(federated::start))
         .route("/api/auth/{provider}/callback", get(federated::callback).post(federated::callback_form))
+        .route("/api/plans", get(account::plans))
         .route("/api/session", get(account::session))
         .route("/api/me", get(account::me).patch(account::update_me))
         .route("/api/me/entitlements", get(account::entitlements))

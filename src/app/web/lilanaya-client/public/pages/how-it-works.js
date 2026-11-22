@@ -4,7 +4,7 @@ import { film, filmCaptions } from '../components/film.js';
 import { CLASSICS, PAYOFF, copyThem, playAll, playMatch } from '../components/pocket-dilemma.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
-import { getUser, signInUrl } from '../session.js';
+import { getUser, signUpUrl } from '../session.js';
 
 // The visitor's own strategy in the "how it works" pictures: version 1 trusts everyone, version 2 copies.
 const YOU = 'challenger';
@@ -609,7 +609,7 @@ export async function howItWorksPage({ onLeave, query }) {
 	onLeave(() => {
 		for (const f of films) f.destroy();
 	});
-	const start = user ? '/strategies/new' : signInUrl('/strategies/new');
+	const start = user ? '/strategies/new' : signUpUrl('/strategies/new');
 
 	// For whoever records the voice: /how-it-works?voice-script lists every caption with the file name its clip must have.
 	const script = query.has('voice-script') ? h('pre', { class: 'code', id: 'voice-script' }) : null;
@@ -642,7 +642,7 @@ export async function howItWorksPage({ onLeave, query }) {
 				]),
 				h('div', { class: 'landing-close stack-md' }, [
 				h('h2', { class: 'section-heading' }, 'Think your strategy can win?'),
-				h('p', null, user ? 'Every strategy you make gets its own avatar.' : 'Sign in with your email. No password needed. Every strategy you make gets its own avatar.'),
+				h('p', null, user ? 'Every strategy you make gets its own avatar.' : 'Sign up with your email. No password needed. Every strategy you make gets its own avatar.'),
 				h('p', { class: 'row' }, [linkButton('Write your first strategy', start, { primary: true }), linkButton('Back to the start', '/')])
 				])
 			]),

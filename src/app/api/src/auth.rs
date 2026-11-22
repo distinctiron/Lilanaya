@@ -91,6 +91,6 @@ impl FromRequestParts<Arc<AppState>> for User {
         Viewer::from_request_parts(parts, state)
             .await?
             .0
-            .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "unauthenticated", "Sign in to do this"))
+            .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "unauthenticated", "Log in to do this"))
     }
 }

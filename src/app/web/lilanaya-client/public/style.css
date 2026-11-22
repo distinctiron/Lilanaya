@@ -2793,6 +2793,566 @@ html:has(.screens) {
 	}
 }
 
+/* --- the menu (components/header.js) ---
+   On a wide window the header is one line of links and this wrapper is not there at all. */
+.site-menu {
+	display: contents;
+}
+
+.btn.menu-toggle {
+	display: none;
+}
+
+/* ==========================================================================
+   PHONE
+   Everything from here to the end of this block applies to narrow windows only (a phone held
+   upright). Nothing in it changes a wider window. The rules, in the order they matter:
+   1. The header is one line; its links are behind a Menu button.
+   2. A page to read settles firmly on one screen at a time, and a screen holds what fits a phone window.
+   3. A page to type on (a form) scrolls freely: a keyboard opening must never move the page.
+   4. Whatever is typed into is 16px, so iOS does not zoom in on it.
+   ========================================================================== */
+@media (max-width: 720px) {
+	/* 1. header */
+	.site-header {
+		justify-content: space-between;
+		gap: 0 12px;
+		padding: 6px var(--gutter);
+		border-bottom-width: 4px;
+	}
+
+	.logo {
+		padding-block: 14px; /* 16px type + 28px = 44px to touch */
+		font-size: 16px;
+	}
+
+	.btn.menu-toggle {
+		display: inline-flex;
+	}
+
+	.site-menu {
+		display: none;
+		flex-direction: column;
+		gap: 12px;
+		width: 100%;
+		padding: 6px 0 12px;
+	}
+
+	.site-header.is-open .site-menu {
+		display: flex;
+	}
+
+	.site-nav {
+		flex-direction: column;
+		gap: 0;
+		font-size: 12px;
+	}
+
+	.site-nav a {
+		padding: 18px 12px;
+		border-bottom: 2px solid var(--lane);
+		color: var(--fg);
+	}
+
+	.site-account {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+		gap: 10px;
+	}
+
+	.site-account .btn {
+		min-height: 48px;
+	}
+
+	.site-account .btn-name {
+		max-width: none;
+		line-height: 36px;
+	}
+
+	/* 2. pages to read: one screen at a time, firmly */
+	html:has(.landing),
+	html:has(.screens) {
+		scroll-snap-type: y mandatory;
+	}
+
+	/* 3. pages to type on: no pull, and no screen stretched to the window's height */
+	html:has(.screens :is(input, select, textarea)) {
+		scroll-snap-type: none;
+	}
+
+	main:has(:is(input, select, textarea)) .screen,
+	main:has(:is(input, select, textarea)) .screens > .screen:first-child {
+		min-height: 0;
+		justify-content: flex-start;
+		padding-block: 20px;
+	}
+
+	/* 4. typing */
+	input,
+	select,
+	textarea {
+		font-size: 16px;
+	}
+
+	/* --- front page: every step fits one phone window --- */
+	.landing-section {
+		padding: 16px 0;
+		border-top-width: 4px;
+	}
+
+	.landing-screen,
+	.landing-screen.stack-md,
+	.landing-screen.stack-lg {
+		gap: 14px;
+		padding-block: 16px;
+	}
+
+	/* The game played by hand: who speaks, the five rounds, the two moves and what they pay, all in view at once. */
+	.talk {
+		gap: 12px;
+	}
+
+	.talk-who {
+		min-width: 48px;
+	}
+
+	.talk-who .avatar {
+		width: 48px;
+		height: 48px;
+	}
+
+	.bubble {
+		padding: 8px 10px;
+		font-size: 13px;
+	}
+
+	.hand-table {
+		gap: 12px;
+		margin-top: 12px;
+		padding-top: 12px;
+	}
+
+	.hand-heads,
+	.hand-lane {
+		grid-template-columns: 44px auto 1fr;
+		gap: 8px;
+		padding: 8px;
+	}
+
+	.hand-who,
+	.hand-heads > :first-child {
+		grid-column: auto;
+	}
+
+	/* The opponent's name is in the speech bubble above; here its face is enough. */
+	.hand-lane:not(.is-you) .hand-who > span {
+		display: none;
+	}
+
+	.hand-total {
+		justify-content: flex-end;
+		gap: 6px;
+	}
+
+	.hand-total > .px {
+		display: none; /* the leading total is already lit */
+	}
+
+	.hand-yours {
+		padding: 10px;
+	}
+
+	.hand-yours > .row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 8px;
+	}
+
+	.btn-move.btn-big {
+		padding: 10px 8px;
+	}
+
+	.hand-points {
+		gap: 0 10px;
+		font-size: 11px;
+	}
+
+	.hand-game .legend {
+		gap: 4px 14px;
+		font-size: 11px;
+	}
+
+	/* Two strategies against each other: the picks are small, so the match stays in view while picking. */
+	.lab .columns {
+		gap: 10px;
+	}
+
+	.lab .columns > * {
+		flex-basis: 100%;
+	}
+
+	.lab-picks {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 6px;
+	}
+
+	.lab-pick {
+		gap: 8px;
+		padding: 4px 8px;
+		font-size: 12px;
+		line-height: 1.3;
+	}
+
+	.lab-pick .meta {
+		display: none; /* the motto: room for it only on a wide window */
+	}
+
+	.landing-screen .lab {
+		gap: 12px;
+	}
+
+	.lab .match-side {
+		gap: 6px;
+	}
+
+	.lab .lab-who {
+		gap: 6px;
+	}
+
+	.landing-screen .match-score {
+		font-size: 32px;
+	}
+
+	.lab .round-strip {
+		grid-template-columns: repeat(20, minmax(0, 1fr));
+		gap: 4px 3px;
+		max-width: none;
+	}
+
+	.lab .round {
+		gap: 3px;
+	}
+
+	.lab .sq {
+		border-width: 2px;
+	}
+
+	/* The three steps: text only, one under the other. */
+	.step {
+		padding: 10px 12px;
+	}
+
+	.step-pic {
+		display: none;
+	}
+
+	/* The heading says what to do, and the two scores say whose row is whose: the sentence and the key are left out. */
+	#strategies > .stack > p,
+	.lab > div > .legend {
+		display: none;
+	}
+
+	.landing-screen .lab {
+		gap: 10px;
+	}
+
+	/* --- How it works: one film per phone window --- */
+	.how-screen {
+		gap: 12px;
+		padding-block: 16px;
+		--stage: clamp(190px, 100svh - 430px, 300px); /* what is left once the heading, the caption, the buttons and the chapters have their room */
+	}
+
+	.how-screen.how-top {
+		padding-block: 12px 0;
+	}
+
+	.how-screen .film {
+		gap: 12px;
+	}
+
+	.how-screen .film > .stack {
+		gap: 10px;
+	}
+
+	.film-caption {
+		min-height: 84px;
+	}
+
+	/* The chapters are four numbered buttons in a line; only the one on show carries its title.
+	   What each chapter says is in the caption under the film, so it is not repeated here. */
+	.how-screen .film-chapters {
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.how-screen .film-chapters p {
+		display: none;
+	}
+
+	.film-pick {
+		gap: 8px;
+		font-size: 0;
+	}
+
+	.film-pick[aria-current] {
+		font-size: 11px;
+	}
+
+	.film-pick-no {
+		width: 44px;
+		height: 44px;
+		font-size: 11px;
+	}
+
+	/* The points table of the third film is a window of its own, right under the film. */
+	.how-screen:has(.pay-table) {
+		justify-content: flex-start;
+		min-height: 200svh;
+		padding-bottom: 0;
+	}
+
+	.how-screen:has(.pay-table) .film,
+	.how-screen:has(.pay-table) .film > .stack-md {
+		display: contents;
+	}
+
+	.how-screen:has(.pay-table) > .legend {
+		order: 1;
+		margin-bottom: auto;
+	}
+
+	.how-screen .film > .stack-md > .stack:has(.pay-table) {
+		order: 2;
+		flex: none;
+		justify-content: center;
+		height: 100svh;
+		scroll-snap-align: start;
+	}
+
+	/* Why Lilanaya: four short reasons and the way in. */
+	.how-screen.stack-lg {
+		gap: 16px;
+	}
+
+	.reasons {
+		gap: 12px;
+	}
+
+	.how-screen .landing-close {
+		gap: 12px;
+	}
+
+	.how-screen.how-top {
+		padding-block: 0;
+	}
+
+	.how-screen .film-chapters {
+		flex-wrap: nowrap;
+	}
+
+	.how-screen .film-chapters li {
+		flex: none;
+	}
+
+	.how-screen .film-chapters li:has([aria-current]) {
+		flex: 0 1 auto;
+		min-width: 0;
+	}
+
+	/* --- a screen that holds several things side by side on a wide window (class `phone-split`):
+	   here each of them is a screen of its own --- */
+	.screens > .screen.phone-split,
+	.phone-split > .columns {
+		display: contents;
+	}
+
+	.phone-split > :not(.columns),
+	.phone-split > .columns > * {
+		display: flex;
+		flex: none;
+		flex-direction: column;
+		justify-content: safe center;
+		min-height: 100svh;
+		padding-block: var(--gutter);
+		scroll-snap-align: start;
+	}
+
+	.screens > .phone-split:first-child > :first-child {
+		min-height: calc(100svh - var(--header-height, 60px));
+		scroll-snap-align: end;
+	}
+
+	/* --- a world's high scores: one short card per actor --- */
+	.grid-table.stacks.score-cards tr {
+		display: grid;
+		grid-template-columns: 28px repeat(3, minmax(0, 1fr));
+		align-items: start;
+		gap: 6px 10px;
+		margin-bottom: 8px;
+		padding: 8px 10px;
+	}
+
+	.grid-table.stacks.score-cards :is(th, td) {
+		display: block;
+		padding: 0;
+		text-align: left;
+		overflow-wrap: normal;
+	}
+
+	.grid-table.stacks.score-cards td.rank::before {
+		content: none;
+	}
+
+	.grid-table.stacks.score-cards th {
+		grid-column: 2 / -1;
+	}
+
+	/* Second line: the three numbers, each under its name. */
+	.grid-table.stacks.score-cards td.num {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+		grid-row: 2;
+	}
+
+	.grid-table.stacks.score-cards td.num::before {
+		font-size: 11px;
+	}
+
+	.grid-table.stacks.score-cards td.num:nth-of-type(2) {
+		grid-column: 2;
+	}
+
+	/* --- the list of runs: one short card per run --- */
+	.grid-table.stacks.runs-list tr {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		align-items: center;
+		gap: 4px 10px;
+		margin-bottom: 8px;
+		padding: 6px 10px 10px;
+	}
+
+	.grid-table.stacks.runs-list :is(th, td) {
+		display: block;
+		padding: 0;
+		text-align: left;
+		overflow-wrap: normal;
+	}
+
+	.grid-table.stacks.runs-list th {
+		grid-column: 1 / 3;
+	}
+
+	.grid-table.stacks.runs-list th a {
+		display: inline-block;
+		padding: 11px 16px 11px 0; /* 44px to touch */
+		font-size: 16px;
+	}
+
+	.grid-table.stacks.runs-list td[data-label='Status'] {
+		text-align: right;
+		font-size: 12px;
+	}
+
+	.grid-table.stacks.runs-list td:is([data-label='Status'], [data-label='World'])::before {
+		content: none;
+	}
+
+	.grid-table.stacks.runs-list td:is([data-label='World'], [data-label='Winner']) {
+		grid-column: 1 / -1;
+	}
+
+	.grid-table.stacks.runs-list td.num {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.grid-table.stacks.runs-list td::before {
+		font-size: 11px;
+	}
+
+	.grid-table.stacks.runs-list td[data-label='Winner'] {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	/* --- the list of worlds: the card says what the world is and where to go; its points table is on the world's own page --- */
+	.folds .columns {
+		gap: 14px;
+	}
+
+	.folds .columns .stack-sm:has(.grid-table) {
+		display: none;
+	}
+
+	.grid-table.stacks.runs-list tr {
+		align-items: start;
+	}
+
+	.grid-table.stacks.runs-list td.num {
+		line-height: 1.3;
+	}
+
+	.grid-table.stacks.runs-list td::before {
+		line-height: 1.3;
+	}
+
+	/* A page that is a single screen (a list, a short form) has nothing to settle between: it scrolls freely. */
+	html:has(.screens > .screen:only-child) {
+		scroll-snap-type: none;
+	}
+
+	/* The game by hand, once it is over: the longest speech, the result and the two buttons still fit the window. */
+	.talk-who {
+		width: 60px;
+	}
+
+	.talk-who .px {
+		font-size: 8px;
+		line-height: 1.4;
+		text-align: center;
+	}
+
+	.hand-game .legend {
+		display: none; /* every square carries its letter, C or D */
+	}
+
+	.hand-result {
+		font-size: 13px;
+	}
+
+	.hand-game .hand-table > .stack {
+		gap: 8px;
+	}
+
+	.hand-yours {
+		gap: 8px;
+	}
+
+	.hand-yours > .px {
+		font-size: 10px;
+		line-height: 1.5;
+	}
+
+	#play {
+		gap: 8px;
+	}
+
+	.hand-table {
+		margin-top: 8px;
+		padding-top: 8px;
+	}
+
+	#play {
+		padding-block: 10px;
+	}
+}
+
 /* Shown instead of the app when JavaScript is off. A class, not a style attribute: the site's content policy allows no inline styles. */
 .noscript {
 	padding: 32px;

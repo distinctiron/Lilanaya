@@ -58,7 +58,7 @@ fn redirect(to: &str, cookies: Vec<String>) -> Response {
 /// Back to the sign-in page, which explains what `code` means.
 fn failed(state: &AppState, code: &str, next: Option<&str>) -> Response {
     let next = next.map(|n| format!("&next={}", encode(n))).unwrap_or_default();
-    redirect(&format!("/sign-in?error={code}{next}"), vec![state_cookie(None, state.config.secure_cookies())])
+    redirect(&format!("/log-in?error={code}{next}"), vec![state_cookie(None, state.config.secure_cookies())])
 }
 
 fn redirect_uri(state: &AppState, provider: &str) -> String {

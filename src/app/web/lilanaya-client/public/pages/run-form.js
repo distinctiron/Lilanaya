@@ -5,14 +5,14 @@ import { screen, screenGroup } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h, prefersReducedMotion } from '../dom.js';
 import { getUser } from '../session.js';
-import { signInPrompt } from './sign-in.js';
+import { logInPrompt } from './sign-in.js';
 
 // Mirrors the API's limits (src/app/api/src/routes.rs); the server still has the final say.
 const MAX_ITERATIONS = 10000;
 const MAX_SEED = Number.MAX_SAFE_INTEGER;
 
 export async function runFormPage({ query, navigate }) {
-	if (!(await getUser())) return { title: 'New run', node: signInPrompt('start a run') };
+	if (!(await getUser())) return { title: 'New run', node: logInPrompt('start a run') };
 	const [{ worlds }, { strategies }] = await Promise.all([getJson('/api/worlds'), getJson('/api/strategies')]);
 	const initial = worlds.find((w) => w.id === query.get('world')) ?? worlds[0];
 

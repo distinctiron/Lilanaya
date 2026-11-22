@@ -75,13 +75,14 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 |---|---|
 | `GET /api/worlds`, `GET /api/worlds/{id}` | World templates |
 | `POST /api/worlds/validate` | Checks a world document: `{"valid", "errors": [{path, message}]}` |
-| `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/sign-out` | Email a one-time sign-in link; trade its token for a session cookie; end the session |
+| `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/sign-out` | Email a one-time link (`intent`: `sign_up` makes the account if there is none, `log_in` never does and says so in the email); trade its token for a session cookie; end the session |
+| `GET /api/plans` | What each plan includes (AI requests, runs), for the sign-up page. Public |
 | `GET /api/session` | `{"user": …}` for the signed-in user, `{"user": null}` otherwise |
 | `GET /api/me`, `PATCH /api/me`, `GET /api/me/entitlements`, `GET /api/usage` | Profile, display name, plan flags, runs used this month (401 when signed out) |
 | `GET /api/strategies`, `GET /api/strategies/{id}` | Built-in, public and own strategies: rules (state machines as data) or code |
 | `POST /api/strategies`, `PUT` / `DELETE /api/strategies/{id}` | Create, replace, delete own strategies (signed in). `mode` is `rules` or `code` and cannot change |
 | `POST /api/strategies/preview` | Checks a draft and plays two sample matches: `{valid, errors, warnings, samples}` (signed in; no run quota, limited per hour) |
-| `POST /api/strategies/compile` | Plain English to rules through the language model (signed in; screened first, 422 `prompt_blocked` if turned down; limited per hour and per day) |
+| `POST /api/strategies/compile` | Plain English to rules through the language model (signed in; screened first, 422 `prompt_blocked` if turned down). Each call that reaches the model uses one of the plan's AI requests: 3 per world for good on the free plan, 20 a month for subscribers; 429 `ai_limit_reached` when they are used up. Also limited per hour and, for all users together, per day |
 | `POST /api/runs` | Queues a run (202; signed in). Body: `world_id`, optional `actors`, `iterations`, `seed`, `policy`, `schedule_mode`. 429 `run_limit_reached` when the month's runs are used up, `too_many_runs` when too many are waiting |
 | `GET /api/runs`, `GET /api/runs/{id}` | Run list; one run with status and, once completed, its results. Private runs answer 404 to everyone but their owner |
 | `GET /api/runs/{id}/matches/{a}/{b}` | Round-by-round moves of one pairing |

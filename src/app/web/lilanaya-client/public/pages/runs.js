@@ -25,7 +25,7 @@ export async function runsPage() {
 				),
 				wrap: (rows) =>
 					h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Runs' }, [
-						h('table', { class: 'grid-table stacks' }, [
+						h('table', { class: 'grid-table stacks runs-list' }, [
 							h('thead', null, h('tr', null, ['Run', 'Status', 'World', 'Seed', 'Rounds', 'Actors', 'Winner'].map((t) => h('th', { scope: 'col' }, t)))),
 							h('tbody', null, rows)
 						])

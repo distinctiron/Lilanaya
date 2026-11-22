@@ -27,7 +27,7 @@ export async function refreshUser() {
 	return user;
 }
 
-/** Records the user returned by a sign-in or profile change. */
+/** Records the user returned by a log-in or profile change. */
 export const setUser = (next) => set(next);
 
 export async function signOut() {
@@ -40,5 +40,8 @@ export function onUserChange(fn) {
 	listeners.add(fn);
 }
 
-/** Where to send someone who must sign in first, coming back to `path` afterwards. */
-export const signInUrl = (path = location.pathname + location.search) => `/sign-in?next=${encodeURIComponent(path)}`;
+/** Where to send someone who must log in first, coming back to `path` afterwards. */
+export const logInUrl = (path = location.pathname + location.search) => `/log-in?next=${encodeURIComponent(path)}`;
+
+/** Where to send someone who has no account yet, going on to `path` once they have one. */
+export const signUpUrl = (path = location.pathname + location.search) => `/sign-up?next=${encodeURIComponent(path)}`;

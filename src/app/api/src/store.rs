@@ -2,6 +2,7 @@
 //! the job queue), per-pairing traces and KPI snapshots.
 
 use crate::auth::{User, SESSION_DAYS, SIGN_IN_LINK_MINUTES};
+use crate::config::Allowance;
 use crate::llm::Spent;
 use crate::strategies::{RunActor, StrategyDoc};
 use lilanaya_engine::{baseline_strategies, prisoners_dilemma, Issue, MatchTrace, RunOutput, RunResult, World};
@@ -81,6 +82,8 @@ pub struct CompileLimits {
     pub per_day: i64,
     /// Tokens all compiles together may use in a day (UTC).
     pub tokens_per_day: i64,
+    /// The AI requests the user's plan includes.
+    pub allowance: Allowance,
 }
 
 /// Whether a compile may go ahead.
@@ -88,6 +91,8 @@ pub struct CompileLimits {
 pub enum CompileGate {
     /// It may; the id of its row in `llm_calls`, to be completed with [`Store::finish_llm_call`].
     Started(i64),
+    /// The plan's AI requests are used up (for this world, or for this month).
+    AllowanceUsed,
     HourlyLimit,
     /// The screen has turned this user down too often lately.
     Suspended,
@@ -97,6 +102,9 @@ pub enum CompileGate {
 
 // Advisory-lock namespaces. A limit is "count, then insert"; taking the lock first makes
 // that one step, so requests arriving together cannot all pass on the same count.
+/// True of rows made in the current calendar month (UTC).
+const THIS_MONTH: &str = "created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'";
+
 const LOCK_RUNS: i32 = 1;
 const LOCK_PREVIEWS: i32 = 2;
 const LOCK_SIGN_IN: i32 = 3;
@@ -322,6 +330,11 @@ impl Store {
     }
 
     /// The user with this address, created on first sign-in.
+    /// Whether this address has an account.
+    pub async fn user_exists(&self, email: &str) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)").bind(email).fetch_one(&self.pool).await
+    }
+
     pub async fn upsert_user(&self, email: &str, default_name: &str) -> Result<User, sqlx::Error> {
         let sql = format!("INSERT INTO users (email, display_name) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING {USER_COLUMNS}");
         sqlx::query(&sql).bind(email).bind(default_name).fetch_one(&self.pool).await.and_then(user_row)
@@ -399,7 +412,7 @@ impl Store {
 
     /// Notes the start of one plain-English compile, unless a limit says no. A compile
     /// that is let through counts against the limits whatever comes of it.
-    pub async fn begin_llm_call(&self, user_id: i64, limits: CompileLimits) -> Result<CompileGate, sqlx::Error> {
+    pub async fn begin_llm_call(&self, user_id: i64, world_id: &str, limits: CompileLimits) -> Result<CompileGate, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         // One lock for everyone: the daily ceiling is shared by all users.
         sqlx::query(TAKE_LOCK).bind(LOCK_COMPILE).bind(0i32).execute(&mut *tx).await?;
@@ -408,14 +421,25 @@ impl Store {
             "SELECT (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND created_at > now() - interval '1 hour') AS hour, \
                     (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND blocked AND created_at > now() - interval '24 hours') AS blocked, \
                     (SELECT count(*) FROM llm_calls WHERE {today}) AS day, \
-                    (SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint FROM llm_calls WHERE {today}) AS tokens"
+                    (SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint FROM llm_calls WHERE {today}) AS tokens, \
+                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND world_id = $2) AS world, \
+                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND {THIS_MONTH}) AS month"
         ))
         .bind(user_id)
+        .bind(world_id)
         .fetch_one(&mut *tx)
         .await?;
         let count = |name: &str| row.try_get::<i64, _>(name);
         if count("blocked")? >= limits.blocked_per_day {
             return Ok(CompileGate::Suspended);
+        }
+        // A request still under way is counted too, so requests arriving together cannot share one place.
+        let used_up = match limits.allowance {
+            Allowance::PerWorld(n) => count("world")? >= n,
+            Allowance::PerMonth(n) => count("month")? >= n,
+        };
+        if used_up {
+            return Ok(CompileGate::AllowanceUsed);
         }
         if count("hour")? >= limits.per_hour {
             return Ok(CompileGate::HourlyLimit);
@@ -423,24 +447,45 @@ impl Store {
         if count("day")? >= limits.per_day || count("tokens")? >= limits.tokens_per_day {
             return Ok(CompileGate::DailyCeiling);
         }
-        let id: i64 = sqlx::query("INSERT INTO llm_calls (user_id) VALUES ($1) RETURNING id").bind(user_id).fetch_one(&mut *tx).await?.try_get("id")?;
+        let id: i64 = sqlx::query("INSERT INTO llm_calls (user_id, world_id) VALUES ($1, $2) RETURNING id").bind(user_id).bind(world_id).fetch_one(&mut *tx).await?.try_get("id")?;
         tx.commit().await?;
         Ok(CompileGate::Started(id))
     }
 
     /// Completes the record of a compile: what the screen said and what the calls used.
-    pub async fn finish_llm_call(&self, id: i64, spent: &Spent) -> Result<(), sqlx::Error> {
+    /// `counted` is false when the language model was never reached, which gives the AI request back.
+    pub async fn finish_llm_call(&self, id: i64, spent: &Spent, counted: bool) -> Result<(), sqlx::Error> {
         let verdict = spent.verdict.as_ref();
-        sqlx::query("UPDATE llm_calls SET verdict = $2, confidence = $3, blocked = $4, input_tokens = $5, output_tokens = $6 WHERE id = $1")
+        sqlx::query("UPDATE llm_calls SET verdict = $2, confidence = $3, blocked = $4, input_tokens = $5, output_tokens = $6, counted = $7 WHERE id = $1")
             .bind(id)
             .bind(verdict.map(|v| v.label.as_str()))
             .bind(verdict.map(|v| v.confidence))
             .bind(verdict.is_some_and(|v| !v.allowed))
             .bind(spent.input_tokens)
             .bind(spent.output_tokens)
+            .bind(counted)
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// AI requests the user has used: in each world for good, and this month across all worlds.
+    pub async fn ai_requests_used(&self, user_id: i64) -> Result<(std::collections::BTreeMap<String, i64>, i64), sqlx::Error> {
+        let rows = sqlx::query(&format!(
+            "SELECT world_id, count(*) AS used, count(*) FILTER (WHERE {THIS_MONTH}) AS month FROM llm_calls WHERE user_id = $1 AND counted GROUP BY world_id"
+        ))
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut by_world = std::collections::BTreeMap::new();
+        let mut month = 0;
+        for row in rows {
+            month += row.try_get::<i64, _>("month")?;
+            if let Some(world) = row.try_get::<Option<String>, _>("world_id")? {
+                by_world.insert(world, row.try_get::<i64, _>("used")?);
+            }
+        }
+        Ok((by_world, month))
     }
 
     // --- runs ---

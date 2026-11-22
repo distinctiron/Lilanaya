@@ -7,7 +7,7 @@ import { screen } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h, prefersReducedMotion } from '../dom.js';
 import { getUser } from '../session.js';
-import { signInPrompt } from './sign-in.js';
+import { logInPrompt } from './sign-in.js';
 
 const CODE_TEMPLATE = `// Called before every round. Return one of input.world.allowedDecisions.
 function decide(input) {
@@ -42,7 +42,7 @@ const CONDITION_TYPES = [
 
 /** Signed-in users pick how to write the strategy; the choice is fixed once saved. */
 export async function chooseModePage() {
-	if (!(await getUser())) return { title: 'New strategy', node: signInPrompt('make a strategy') };
+	if (!(await getUser())) return { title: 'New strategy', node: logInPrompt('make a strategy') };
 	return {
 		title: 'New strategy',
 		node: h('section', { class: 'stack-lg' }, [
@@ -146,7 +146,7 @@ function fromModel(model) {
 
 export async function strategyEditorPage({ params, navigate, onLeave }) {
 	const user = await getUser();
-	if (!user) return { title: 'Strategy', node: signInPrompt(params.id ? 'edit a strategy' : 'make a strategy') };
+	if (!user) return { title: 'Strategy', node: logInPrompt(params.id ? 'edit a strategy' : 'make a strategy') };
 
 	const existing = params.id ? await getJson(`/api/strategies/${encodeURIComponent(params.id)}`) : null;
 	if (existing && !existing.mine) throw new ApiError(403, 'forbidden', 'Only its owner can edit a strategy.');
@@ -796,17 +796,55 @@ function rulesFields(existing, { decisions, world, user, name, description, stag
 						: h('div', { class: 'error-box', role: 'alert' }, h('p', null, message))
 				);
 			}
-			compileButton.disabled = false;
 			byHand.disabled = false;
 			prompt.readOnly = false;
+			// Whatever came of it, show what is left; a failure to ask leaves the last known number in place.
+			try {
+				usage = await getJson('/api/usage');
+			} catch (error) {
+				if (!(error instanceof ApiError)) console.error(error);
+			}
+			showAllowance();
 		}
 	});
+
+	// AI requests: the plan has a number per world (for good) or per month. Say how many are left before one is used.
+	let usage = user.usage;
+	const allowance = h('p', { class: 'meta', 'aria-live': 'polite', hidden: !canCompile, 'data-role': 'ai-requests' });
+	const showAllowance = () => {
+		const ai = usage?.ai_requests;
+		if (!canCompile || !ai) {
+			compileButton.disabled = !canCompile;
+			return;
+		}
+		const perWorld = ai.per === 'world';
+		const left = Math.max(0, ai.limit - (perWorld ? (ai.used_by_world[world.id] ?? 0) : ai.used_this_month));
+		const scope = perWorld ? `for ${world.metadata.name}` : 'this month';
+		allowance.textContent =
+			left > 0
+				? `${left} of ${ai.limit} AI requests left ${scope} · Each press of “Turn into rules” uses one${perWorld ? ' · They never come back' : ''}`
+				: `No AI requests left ${scope}${perWorld ? ' · They do not come back' : ' · They come back on the 1st'} · You can still build the rules by hand, or write the strategy in code`;
+		compileButton.disabled = left === 0;
+	};
+	showAllowance();
+	// The numbers that came with the session may be from before an earlier request: ask again.
+	if (canCompile) {
+		getJson('/api/usage')
+			.then((fresh) => {
+				usage = fresh;
+				showAllowance();
+			})
+			.catch((error) => {
+				if (!(error instanceof ApiError)) console.error(error);
+			});
+	}
 
 	draw();
 	const body = h('div', { class: 'stack-md' }, [
 		h('div', { class: 'stack' }, [
 			h('div', { class: 'field' }, [h('label', { class: 'field-label', for: 'strategy-prompt' }, staged ? 'Describe your strategy in plain English' : 'Describe it in plain English'), prompt, hint]),
 			h('div', { class: 'row' }, [compileButton, byHand]),
+			allowance,
 			compileNote
 		]),
 		rulesSection

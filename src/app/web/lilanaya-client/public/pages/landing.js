@@ -3,7 +3,7 @@ import { button, linkButton } from '../components/button.js';
 import { CLASSICS, PAYOFF, playAll, playMatch } from '../components/pocket-dilemma.js';
 import { roundStrip, stripLegend } from '../components/round-strip.js';
 import { h, prefersReducedMotion } from '../dom.js';
-import { getUser, signInUrl } from '../session.js';
+import { getUser, signUpUrl } from '../session.js';
 
 // The front page teaches by doing, one idea per step:
 //   1. the visitor plays five rounds by hand against an opponent that talks back (the rules);
@@ -372,7 +372,7 @@ export async function landingPage({ onLeave }) {
 	const ranking = classicsRanking();
 	onLeave(() => lab.destroy());
 
-	const start = user ? '/strategies/new' : signInUrl('/strategies/new');
+	const start = user ? '/strategies/new' : signUpUrl('/strategies/new');
 	const playHeading = h('h2', { class: 'section-heading', tabindex: '-1' }, 'Play five rounds');
 	const arenaHeading = h('h2', { class: 'section-heading', tabindex: '-1' }, 'Now strategies play each other');
 	const rankHeading = h('h2', { class: 'section-heading', tabindex: '-1' }, 'The ranking');
@@ -409,7 +409,7 @@ export async function landingPage({ onLeave }) {
 				steps(),
 				h('div', { class: 'landing-close stack' }, [
 					h('p', null, linkButton('Create your first strategy', start, { primary: true, class: 'btn btn-primary btn-big' })),
-					user ? null : h('p', { class: 'meta' }, 'Sign in with your email. No password needed.'),
+					user ? null : h('p', { class: 'meta' }, 'Sign up with your email. No password needed.'),
 					h('p', { class: 'meta' }, ['Want the full story first? ', h('a', { href: '/how-it-works' }, 'How it works'), ' has three short films and a closer look at the Prisoner’s Dilemma.'])
 				])
 			])

@@ -9,7 +9,7 @@ import { profilePage } from './pages/profile.js';
 import { resultsPage } from './pages/results.js';
 import { runFormPage } from './pages/run-form.js';
 import { runsPage } from './pages/runs.js';
-import { confirmSignInPage, signInPage } from './pages/sign-in.js';
+import { confirmLinkPage, logInPage, signUpPage } from './pages/sign-in.js';
 import { strategiesPage } from './pages/strategies.js';
 import { chooseModePage, strategyEditorPage } from './pages/strategy-editor.js';
 import { worldPage } from './pages/world.js';
@@ -60,8 +60,12 @@ startRouter(
 		['/strategies/new', chooseModePage],
 		['/strategies/new/:mode', strategyEditorPage],
 		['/strategies/:id/edit', strategyEditorPage],
-		['/sign-in', signInPage],
-		['/sign-in/confirm', confirmSignInPage],
+		['/sign-up', signUpPage],
+		['/log-in', logInPage],
+		['/log-in/confirm', confirmLinkPage],
+		// The old addresses, for links emailed before they changed.
+		['/sign-in', logInPage],
+		['/sign-in/confirm', confirmLinkPage],
 		['/profile', profilePage],
 		['/runs', runsPage],
 		['/runs/new', runFormPage],

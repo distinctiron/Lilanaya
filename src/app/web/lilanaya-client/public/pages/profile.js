@@ -3,7 +3,7 @@ import { button } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
 import { refreshUser, setUser, signOut } from '../session.js';
-import { signInPrompt } from './sign-in.js';
+import { logInPrompt } from './sign-in.js';
 
 const ENTITLEMENTS = [
 	['analytics_access', 'Analytics and replays'],
@@ -11,10 +11,28 @@ const ENTITLEMENTS = [
 	['private_worlds', 'Private worlds']
 ];
 
+/** AI requests used against the plan: per world for good, or per month across worlds. */
+function aiRequests(ai) {
+	if (!ai) return null;
+	const used = Object.entries(ai.used_by_world);
+	const lines =
+		ai.per === 'world'
+			? [
+					h('p', null, [h('strong', null, `${ai.limit} per world`), ' · They never come back']),
+					used.length ? h('ul', { class: 'plain-list tight' }, used.map(([world, n]) => h('li', null, `${world} · ${Math.min(n, ai.limit)} of ${ai.limit} used`))) : h('p', { class: 'meta' }, 'None used yet')
+				]
+			: [h('p', null, [h('strong', null, `${Math.max(0, ai.limit - ai.used_this_month)} left`), ` · ${ai.used_this_month} of ${ai.limit} used this month`]), h('p', { class: 'meta' }, 'Across all worlds · Resets on the 1st')];
+	return h('div', { class: 'stack' }, [
+		sectionHeading('AI requests'),
+		...lines,
+		h('p', { class: 'meta' }, 'One is used every time the AI turns a description into rules, rewrites included · Rules built by hand and code are not limited')
+	]);
+}
+
 export async function profilePage({ navigate, refresh }) {
 	// Ask again rather than trust the cached copy: runs started since change the count.
 	const user = await refreshUser();
-	if (!user) return { title: 'Profile', node: signInPrompt('see your profile') };
+	if (!user) return { title: 'Profile', node: logInPrompt('see your profile') };
 
 	const { usage } = user;
 	const share = usage.monthly_runs > 0 ? Math.min(1, usage.used / usage.monthly_runs) : 1;
@@ -70,6 +88,7 @@ export async function profilePage({ navigate, refresh }) {
 						h('div', { class: 'meter', role: 'img', 'aria-label': `${usage.used} of ${usage.monthly_runs} runs used` }, h('div', { style: { width: `${share * 100}%` } })),
 						h('p', { class: 'meta' }, `Month ${usage.period} · Resets on the 1st · ${usage.max_active_runs} ${usage.max_active_runs === 1 ? 'run' : 'runs'} at a time`)
 					]),
+					aiRequests(usage.ai_requests),
 					h('div', { class: 'stack' }, [
 						sectionHeading('Your plan includes'),
 						h(
@@ -83,7 +102,7 @@ export async function profilePage({ navigate, refresh }) {
 			h(
 				'div',
 				null,
-				button('Sign out', {
+				button('Log out', {
 					onclick: async () => {
 						try {
 							await signOut();

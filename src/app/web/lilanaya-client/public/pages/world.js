@@ -61,7 +61,7 @@ function leaderboard(board) {
 			),
 			wrap: (rows) =>
 				h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Leaderboard' }, [
-					h('table', { class: 'grid-table stacks' }, [
+					h('table', { class: 'grid-table stacks score-cards' }, [
 						h('thead', null, h('tr', null, ['Rank', 'Actor', 'Average', 'Variance', 'Matches'].map((t) => h('th', { scope: 'col' }, t)))),
 						h('tbody', null, rows)
 					])
@@ -123,7 +123,8 @@ export async function worldPage({ params }) {
 						h('div', { class: 'stack' }, [sectionHeading('Payoff matrix'), payoffTable(world)])
 					])
 				],
-				{ class: 'stack-lg' }
+				// `phone-split`: on a phone the introduction, the rules and the payoff matrix are a screen each (style.css, PHONE).
+				{ class: 'stack-lg phone-split' }
 			),
 			// On a laptop one screen: who is winning beside the indicators, and who plays underneath.
 			screenGroup([
