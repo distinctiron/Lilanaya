@@ -50,28 +50,35 @@ export async function profilePage({ navigate, refresh }) {
 		title: 'Profile',
 		node: h('section', { class: 'stack-lg' }, [
 			sectionHeading('Profile', { level: 1 }),
-			h('dl', { class: 'rules' }, [
-				h('dt', { class: 'meta' }, 'Email'),
-				h('dd', null, user.email),
-				h('dt', { class: 'meta' }, 'Roles'),
-				h('dd', null, user.roles.join(', ')),
-				h('dt', { class: 'meta' }, 'Plan'),
-				h('dd', null, user.plan === 'subscriber' ? 'Subscriber' : 'Free')
-			]),
-			form,
-			h('div', { class: 'stack' }, [
-				sectionHeading('Runs this month'),
-				h('p', null, [h('strong', null, `${usage.remaining} left`), ` · ${usage.used} of ${usage.monthly_runs} used`]),
-				h('div', { class: 'meter', role: 'img', 'aria-label': `${usage.used} of ${usage.monthly_runs} runs used` }, h('div', { style: { width: `${share * 100}%` } })),
-				h('p', { class: 'meta' }, `Month ${usage.period} · Resets on the 1st${usage.enforced ? '' : ' · The limit is not enforced yet'}`)
-			]),
-			h('div', { class: 'stack' }, [
-				sectionHeading('Your plan includes'),
-				h(
-					'ul',
-					{ class: 'plain-list tight' },
-					ENTITLEMENTS.map(([key, label]) => h('li', null, [label, ' · ', h('span', { class: 'muted' }, user.entitlements[key] ? 'Included' : 'Subscribers only')]))
-				)
+			// Side by side where there is room, so the whole profile is one screen: who you are, and what your plan gives you.
+			h('div', { class: 'columns' }, [
+				h('div', { class: 'stack-lg' }, [
+					h('dl', { class: 'rules' }, [
+						h('dt', { class: 'meta' }, 'Email'),
+						h('dd', null, user.email),
+						h('dt', { class: 'meta' }, 'Roles'),
+						h('dd', null, user.roles.join(', ')),
+						h('dt', { class: 'meta' }, 'Plan'),
+						h('dd', null, user.plan === 'subscriber' ? 'Subscriber' : 'Free')
+					]),
+					form
+				]),
+				h('div', { class: 'stack-lg' }, [
+					h('div', { class: 'stack' }, [
+						sectionHeading('Runs this month'),
+						h('p', null, [h('strong', null, `${usage.remaining} left`), ` · ${usage.used} of ${usage.monthly_runs} used`]),
+						h('div', { class: 'meter', role: 'img', 'aria-label': `${usage.used} of ${usage.monthly_runs} runs used` }, h('div', { style: { width: `${share * 100}%` } })),
+						h('p', { class: 'meta' }, `Month ${usage.period} · Resets on the 1st${usage.enforced ? '' : ' · The limit is not enforced yet'}`)
+					]),
+					h('div', { class: 'stack' }, [
+						sectionHeading('Your plan includes'),
+						h(
+							'ul',
+							{ class: 'plain-list tight' },
+							ENTITLEMENTS.map(([key, label]) => h('li', null, [label, ' · ', h('span', { class: 'muted' }, user.entitlements[key] ? 'Included' : 'Subscribers only')]))
+						)
+					])
+				])
 			]),
 			h(
 				'div',

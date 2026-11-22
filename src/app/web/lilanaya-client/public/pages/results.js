@@ -3,7 +3,9 @@ import { avatar, avatarName } from '../components/avatar.js';
 import { barRow } from '../components/bar-row.js';
 import { button, linkButton } from '../components/button.js';
 import { matrixGrid } from '../components/matrix-grid.js';
+import { raceChart } from '../components/race.js';
 import { roundStrip, stripLegend } from '../components/round-strip.js';
+import { screen, screenGroup, screens } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { fmt, fmtValue, h, prefersReducedMotion } from '../dom.js';
 
@@ -49,17 +51,6 @@ function decisionNames(decisions) {
 	};
 }
 
-/** True if the actor ever played D no later than its opponent did (it was not provoked). */
-function defectsFirst(run, actorId) {
-	return run.matches.some((m) => {
-		const side = m.a === actorId ? 0 : m.b === actorId ? 1 : -1;
-		if (side < 0) return false;
-		const mine = m.first_played.D[side];
-		const theirs = m.first_played.D[1 - side];
-		return mine != null && (theirs == null || mine <= theirs);
-	});
-}
-
 /** The match view: two players across the centre line, the round strip and its legend. */
 function buildMatch({ trace, world, names, roundLabel, faces }) {
 	const total = trace.iterations;
@@ -87,7 +78,8 @@ function buildMatch({ trace, world, names, roundLabel, faces }) {
 	const scoreA = h('div', { class: 'match-score' });
 	const scoreB = h('div', { class: 'match-score' });
 	const node = [
-		h('h2', { class: 'visually-hidden' }, `Match: ${trace.a.name} versus ${trace.b.name}`),
+		h('div', { class: 'row spread' }, [sectionHeading(`Match: ${trace.a.name} versus ${trace.b.name}`), h('div', { class: 'meta' }, roundLabel)]),
+		h('p', { class: 'meta match-note' }, 'One of the matches of this run, round by round · The big numbers are the points each side won in this match alone'),
 		h('div', { class: 'match' }, [
 			h('div', { class: 'match-side match-left' }, [avatar(faces[0], { size: 48 }), h('div', { class: 'match-name' }, trace.a.name), scoreA]),
 			h('div', { class: 'centre-line', 'aria-hidden': 'true' }),
@@ -157,7 +149,7 @@ function failedView(run) {
 
 function kpiSection(run) {
 	if (!run.kpis?.length) return null;
-	return h('section', { class: 'stack' }, [
+	return h('div', { class: 'stack' }, [
 		sectionHeading('Indicators'),
 		h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Indicators' }, [
 			h('table', { class: 'grid-table' }, [
@@ -168,6 +160,9 @@ function kpiSection(run) {
 	]);
 }
 
+/** Points as a whole number with thousands separators. */
+const points = (n) => Math.round(n).toLocaleString('en');
+
 const kb = (bytes) => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
 
 /** The run's files in object storage. Each link goes through the API, which redirects to a short-lived signed URL. */
@@ -176,7 +171,7 @@ function downloadsSection(files) {
 	const link = (f, label) => h('li', null, [h('a', { href: f.href }, label ?? f.name), h('span', { class: 'muted' }, `  ${kb(f.size_bytes)}`)]);
 	const main = ['run_summary.json', 'pairwise_matrix.json', 'manifest.json'].map((name) => files.find((f) => f.name === name)).filter(Boolean);
 	const traces = files.filter((f) => f.name.startsWith('traces/'));
-	return h('section', { class: 'stack' }, [
+	return h('div', { class: 'stack' }, [
 		sectionHeading('Downloads'),
 		h('ul', { class: 'plain-list tight' }, main.map((f) => link(f))),
 		traces.length
@@ -194,32 +189,41 @@ export async function resultsPage(ctx) {
 	const run = await getJson(`/api/runs/${encodeURIComponent(params.id)}`);
 	if (run.status === 'queued' || run.status === 'running') return waitingView(run, ctx);
 	if (run.status === 'failed') return failedView(run);
-	const [world, { artifacts }] = await Promise.all([
+	const [world, { artifacts }, raceData] = await Promise.all([
 		getJson(`/api/worlds/${encodeURIComponent(run.world_id)}`),
-		getJson(`/api/runs/${run.id}/artifacts`)
+		getJson(`/api/runs/${run.id}/artifacts`),
+		getJson(`/api/runs/${run.id}/race`)
 	]);
 	const names = decisionNames(run.decisions);
 	const face = (actor) => actor.strategy_id ?? actor.id; // avatars belong to strategies
 	const byId = new Map(run.actors.map((actor, index) => [actor.id, { ...actor, index }]));
 	const ranked = run.ranking.map((id) => byId.get(id));
 
+	// --- the race: the run as a season of match days, total points after each ---
+	const race = raceChart({
+		seed: run.seed,
+		rounds: raceData.rounds,
+		iterations: raceData.iterations,
+		matches: raceData.matches,
+		actors: ranked.map((actor) => ({ id: actor.id, name: actor.name, face: face(actor) }))
+	});
+	onLeave(() => race.stop());
+
 	// --- high scores ---
-	const best = Math.max(...ranked.map((actor) => actor.average));
+	const best = Math.max(...ranked.map((actor) => actor.total));
 	const bars = ranked.map((actor, i) => {
-		const first = names.isCD ? defectsFirst(run, actor.id) : null;
 		return barRow({
 			rank: i + 1,
 			name: avatarName(face(actor), actor.name),
-			score: fmt(actor.average),
-			share: best > 0 ? Math.max(0, actor.average) / best : 0,
-			solid: first !== true,
-			label: first == null ? null : first ? 'Yes' : 'No'
+			score: points(actor.total),
+			share: best > 0 ? Math.max(0, actor.total) / best : 0
 		});
 	});
 	const growBars = (g) => bars.forEach((bar) => bar.grow(g));
-	const highScores = h('section', { class: 'stack high-scores' }, [
+	const highScores = screen(
+		[
 		sectionHeading('High scores'),
-		h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'High scores' }, [
+		h('div', null, [
 			h('table', { class: 'bars' }, [
 				h(
 					'thead',
@@ -228,22 +232,21 @@ export async function resultsPage(ctx) {
 						h('th', { scope: 'col' }, h('span', { class: 'visually-hidden' }, 'Rank')),
 						h('th', { scope: 'col' }, 'Actor'),
 						h('td', null),
-						h('th', { scope: 'col', class: 'score-head' }, 'Avg'),
-						names.isCD ? h('th', { scope: 'col' }, 'Defects first') : null
+						h('th', { scope: 'col', class: 'score-head' }, 'Total')
 					])
 				),
 				h('tbody', null, bars.map((bar) => bar.row))
 			])
 		]),
-		h('p', { class: 'meta' }, [
-			'Average payoff per round',
-			names.isCD ? ' · Blue bar never defects first · Magenta bar defects first' : ''
-		])
-	]);
+		h('p', { class: 'meta' }, 'Total points over all matches')
+		],
+		{ class: 'stack high-scores' }
+	);
 
 	// --- match view ---
 	const roundLabel = h('div', null);
-	const matchSection = h('section', { class: 'stack-md', 'aria-busy': 'true' });
+	// The match view stays away until a match is picked from the head-to-head table (or the address names one).
+	const matchSection = screen([sectionHeading('Match'), h('p', { class: 'muted prose' }, 'Pick a cell in the head-to-head table to watch that match here, round by round.')], { class: 'stack-md is-empty' });
 	let match = null;
 	let timer = 0;
 	let request = 0;
@@ -276,7 +279,9 @@ export async function resultsPage(ctx) {
 	const matrix = matrixGrid({
 		actors: ranked.map((actor) => ({ ...actor, face: face(actor) })),
 		values: ranked.map((row) => ranked.map((col) => run.pairwise[row.index][col.index])),
-		caption: 'Head to head: average payoff per round of the row actor against the column actor',
+		caption: 'Head to head: average points per round of the row actor against the column actor',
+		format: fmt,
+		unit: 'points per round',
 		hrefFor: (row, col) => pairHref(row.id, col.id),
 		onPick: (row, col, e) => {
 			e.preventDefault();
@@ -291,46 +296,54 @@ export async function resultsPage(ctx) {
 		if (mine !== request) return; // a newer pick, or the page was left
 		match = buildMatch({ trace, world, names, roundLabel, faces: [face(byId.get(a)), face(byId.get(b))] });
 		matchSection.replaceChildren(...match.node.filter(Boolean));
-		matchSection.removeAttribute('aria-busy');
+		matchSection.classList.remove('is-empty');
 		matrix.select(a, b);
 
-		const runKey = `run:${run.id}`;
-		const matchKey = `${runKey}:${a}:${b}`;
-		const moving = !prefersReducedMotion();
-		play({ strip: moving && !seen.has(matchKey), grow: moving && !seen.has(runKey) });
-		seen.add(runKey);
+		// Its rounds fill in one at a time the first time it is shown.
+		const matchKey = `run:${run.id}:${a}:${b}`;
+		play({ strip: !prefersReducedMotion() && !seen.has(matchKey), grow: false });
 		seen.add(matchKey);
 	}
 
-	// The match on show: from the URL if it names a real pairing, otherwise first against second.
-	let [a, b] = [query.get('a'), query.get('b')];
-	if (!byId.has(a) || !byId.has(b) || a === b) [a, b] = [ranked[0].id, ranked[1].id];
-	await showMatch(a, b);
+	// A match is on show from the start only when the address names a real pairing.
+	const [a, b] = [query.get('a'), query.get('b')];
+	const named = byId.has(a) && byId.has(b) && a !== b;
+	if (named) await showMatch(a, b);
 
+	// The race plays the first time a result is opened; after that it is shown finished, with Replay.
+	const runKey = `run:${run.id}`;
+	if (!seen.has(runKey) && !named) requestAnimationFrame(() => race.play());
+	seen.add(runKey);
+
+	const extras = [kpiSection(run), downloadsSection(artifacts)].filter(Boolean);
 	return {
 		title: `Run ${run.id}`,
-		node: h('div', { class: 'stack-lg' }, [
-			h('section', { class: 'stack-md' }, [
-				h('div', { class: 'row spread' }, [
-					sectionHeading(`Run ${run.id}`, { level: 1 }),
-					button('Replay', { onclick: () => play({ strip: true, grow: true }) })
-				]),
-				h('div', { class: 'row spread meta' }, [
-					h('div', null, [h('a', { href: `/worlds/${run.world_id}` }, run.world_name), ` · Seed ${run.seed} · ${run.actors.length} actors`, run.schedule_mode ? ` · ${SCHEDULE[run.schedule_mode] ?? run.schedule_mode}` : '']),
-					roundLabel
-				])
-			]),
-			matchSection,
-			h('div', { class: 'columns' }, [
-				highScores,
-				h('section', { class: 'stack head-to-head' }, [
-					sectionHeading('Head to head'),
-					matrix.node,
-					h('p', { class: 'meta' }, 'Row’s average per round against column · Pick a cell to watch that match')
-				])
-			]),
-			kpiSection(run),
-			downloadsSection(artifacts)
+		// The race has a screen to itself; the rest share screens where the window is wide.
+		node: screens([
+			screen(
+				[
+					h('div', { class: 'row spread' }, [
+						sectionHeading(`Run ${run.id}`, { level: 1 }),
+						button('Replay', {
+							onclick: () => {
+								window.scrollTo({ top: 0 });
+								race.play();
+							}
+						})
+					]),
+					h('div', { class: 'meta' }, [h('a', { href: `/worlds/${run.world_id}` }, run.world_name), ` · Seed ${run.seed} · ${run.actors.length} actors · ${points(run.iterations)} rounds per match`, run.schedule_mode ? ` · ${SCHEDULE[run.schedule_mode] ?? run.schedule_mode}` : '']),
+					// The race takes whatever height the window has left, so the fixtures, the chart and its caption share one screen.
+					race.node,
+					h('p', { class: 'meta' }, 'Total points after each match day · Everyone plays one match per match day · The order is drawn from the seed and does not change the final totals')
+				],
+				{ class: 'stack race-screen' }
+			),
+			// On a laptop these share screens: the final table beside the small print, and head to head beside the match picked from it.
+			extras.length ? screenGroup([highScores, screen(extras, { class: 'stack-lg' })]) : highScores,
+			screenGroup([
+				screen([sectionHeading('Head to head'), matrix.node, h('p', { class: 'meta' }, 'Row’s average points per round against column · Pick a cell to watch that match')], { class: 'stack head-to-head' }),
+				matchSection
+			])
 		])
 	};
 }

@@ -1,8 +1,9 @@
 import { ApiError, getJson, postJson } from '../api.js';
 import { avatar } from '../components/avatar.js';
 import { button } from '../components/button.js';
+import { screen, screenGroup } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
-import { h } from '../dom.js';
+import { h, prefersReducedMotion } from '../dom.js';
 import { getUser } from '../session.js';
 import { signInPrompt } from './sign-in.js';
 
@@ -63,15 +64,22 @@ export async function runFormPage({ query, navigate }) {
 	const boxes = strategies.map((s) => h('input', { type: 'checkbox', name: 'actors', value: s.id, id: `actor-${s.id}`, checked: s.builtin }));
 	const option = (s) => {
 		const note = [s.mine && s.visibility === 'private' ? 'Private: the run will be private too' : null, !s.mine && !s.builtin ? `By ${s.owner_name}` : null, s.description].filter(Boolean).join(' · ');
-		return h('label', { class: 'check', for: `actor-${s.id}` }, [boxes[strategies.indexOf(s)], avatar(s.id, { size: 24 }), h('span', null, [h('strong', null, s.name), note ? [h('br'), h('span', { class: 'muted' }, note)] : null])]);
+		// The note is cut to two lines so the whole field fits a screen; the full text is one hover away.
+		return h('label', { class: 'check', for: `actor-${s.id}` }, [
+			boxes[strategies.indexOf(s)],
+			avatar(s.id, { size: 24 }),
+			h('span', { class: 'check-text' }, [h('strong', null, s.name), note ? h('span', { class: 'check-note muted', title: note }, note) : null])
+		]);
 	};
-	const group = (title, list) => (list.length ? [h('p', { class: 'meta' }, title), list.map(option)] : null);
+	const group = (title, list) => (list.length ? [h('p', { class: 'meta' }, title), h('div', { class: 'check-grid' }, list.map(option))] : null);
+	const actorsError = h('p', { class: 'error-box', role: 'alert', hidden: true }, 'Pick at least two actors.');
 	const actorsField = h('fieldset', { class: 'stack-sm', 'aria-describedby': 'run-actors-hint' }, [
 		h('legend', { class: 'field-label' }, 'Actors'),
 		h('p', { class: 'meta', id: 'run-actors-hint' }, 'Pick at least two. Every actor plays every other actor.'),
 		group('Built in', strategies.filter((s) => s.builtin)),
 		group('Yours', strategies.filter((s) => s.mine)),
-		group('From other players', strategies.filter((s) => !s.mine && !s.builtin))
+		group('From other players', strategies.filter((s) => !s.mine && !s.builtin)),
+		actorsError
 	]);
 
 	const errors = h('div', { class: 'error-box', role: 'alert', hidden: true });
@@ -85,15 +93,44 @@ export async function runFormPage({ query, navigate }) {
 	};
 
 	const submit = button('Run simulation', { primary: true, type: 'submit' });
+	// The second screen: how long and in what order, and the button that starts the run.
+	const settings = screen(
+		[
+			sectionHeading('Settings'),
+			h('div', { class: 'stack-lg form' }, [
+				h('div', { class: 'field-row' }, [
+					h('div', { class: 'field' }, [
+						h('label', { class: 'field-label', for: 'run-iterations' }, 'Rounds per match'),
+						iterations,
+						h('p', { class: 'meta', id: 'run-iterations-hint' }, `1 to ${MAX_ITERATIONS}`)
+					]),
+					h('div', { class: 'field' }, [
+						h('label', { class: 'field-label', for: 'run-seed' }, 'Seed'),
+						seed,
+						h('p', { class: 'meta', id: 'run-seed-hint' }, 'Same seed, same result')
+					])
+				]),
+				h('div', { class: 'field' }, [
+					h('label', { class: 'field-label', for: 'run-order' }, 'Match order'),
+					order,
+					h('p', { class: 'meta', id: 'run-order-hint' }, 'Every pair still plays every round · A random order is drawn from the seed')
+				]),
+				errors,
+				h('div', null, submit)
+			])
+		],
+		{ class: 'stack-md' }
+	);
 	const form = h(
 		'form',
 		{
-			class: 'stack-lg form',
+			class: 'screens',
 			onsubmit: async (e) => {
 				e.preventDefault();
 				const actors = boxes.filter((b) => b.checked).map((b) => b.value);
+				actorsError.hidden = actors.length >= 2;
 				if (actors.length < 2) {
-					showError('Pick at least two actors.');
+					// Said where the actors are picked, a screen up from the button that was pressed.
 					boxes[0].focus();
 					return;
 				}
@@ -117,33 +154,20 @@ export async function runFormPage({ query, navigate }) {
 				}
 			}
 		},
-		[
-			h('div', { class: 'field' }, [h('label', { class: 'field-label', for: 'run-world' }, 'World'), worldSelect]),
-			actorsField,
-			h('div', { class: 'field-row' }, [
-				h('div', { class: 'field' }, [
-					h('label', { class: 'field-label', for: 'run-iterations' }, 'Rounds per match'),
-					iterations,
-					h('p', { class: 'meta', id: 'run-iterations-hint' }, `1 to ${MAX_ITERATIONS}`)
-				]),
-				h('div', { class: 'field' }, [
-					h('label', { class: 'field-label', for: 'run-seed' }, 'Seed'),
-					seed,
-					h('p', { class: 'meta', id: 'run-seed-hint' }, 'Same seed, same result')
-				])
-			]),
-			h('div', { class: 'field' }, [
-				h('label', { class: 'field-label', for: 'run-order' }, 'Match order'),
-				order,
-				h('p', { class: 'meta', id: 'run-order-hint' }, 'Every pair still plays every round · A random order is drawn from the seed')
-			]),
-			errors,
-			h('div', null, submit)
-		]
+		// Who plays, and how long and in what order: side by side on a laptop, two screens on a phone.
+		screenGroup([
+			screen(
+				[
+					sectionHeading('New run', { level: 1 }),
+					h('div', { class: 'field form' }, [h('label', { class: 'field-label', for: 'run-world' }, 'World'), worldSelect]),
+					actorsField,
+					h('div', { class: 'next-step' }, button('Next: settings', { onclick: () => settings.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }) }))
+				],
+				{ class: 'stack' }
+			),
+			settings
+		], { class: 'wide-left' })
 	);
 
-	return {
-		title: 'New run',
-		node: h('section', { class: 'stack-lg' }, [sectionHeading('New run', { level: 1 }), form])
-	};
+	return { title: 'New run', node: form };
 }

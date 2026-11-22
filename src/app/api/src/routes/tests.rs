@@ -351,6 +351,36 @@ async fn match_view_returns_moves_in_the_order_asked() {
 }
 
 #[tokio::test]
+async fn the_race_gives_every_match_round_by_round() {
+    let app = TestApp::new().await;
+    let run = app.run(pd(json!({ "iterations": 6 }))).await;
+    let (status, race) = app.get("/api/runs/1/race").await;
+    assert_eq!(status, StatusCode::OK, "{race}");
+    assert_eq!(race["rounds"], json!([1, 2, 3, 4, 5, 6]));
+    let matches = race["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 6, "four actors play six matches");
+    // Always Defect against Tit for Tat: 5 to 0 in the first round, then 1 each.
+    let m = matches.iter().find(|m| m["a"] == "always_defect" && m["b"] == "tit_for_tat").unwrap();
+    assert_eq!(m["totals"], json!([[5, 6, 7, 8, 9, 10], [0, 1, 2, 3, 4, 5]]));
+    // The last points of an actor's matches add up to its total in the results.
+    for actor in run["actors"].as_array().unwrap() {
+        let total: i64 = matches
+            .iter()
+            .filter_map(|m| if m["a"] == actor["id"] { Some(0) } else if m["b"] == actor["id"] { Some(1) } else { None }.map(|side| m["totals"][side][5].as_i64().unwrap()))
+            .sum();
+        assert_eq!(json!(total), actor["total"], "{}", actor["id"]);
+    }
+
+    // Long matches are sampled; the last sample is the final round.
+    app.run(pd(json!({ "iterations": 1000 }))).await;
+    let (_, long) = app.get("/api/runs/2/race").await;
+    let rounds = long["rounds"].as_array().unwrap();
+    assert_eq!((rounds.len(), rounds[59].as_u64()), (60, Some(1000)));
+    assert_eq!(app.get("/api/runs/99/race").await.0, StatusCode::NOT_FOUND);
+    app.close().await;
+}
+
+#[tokio::test]
 async fn pairwise_metrics_come_from_a_completed_run() {
     let app = TestApp::new().await;
     let (status, empty) = app.get("/api/worlds/prisoners-dilemma/pairwise").await;
@@ -787,13 +817,27 @@ async fn plain_english_is_compiled_to_rules_and_checked() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!((body["valid"].as_bool(), body["rationale"].as_str()), (Some(true), Some("Two states.")));
     assert_eq!(body["strategy"]["states"], json!(["NICE", "GRIM"]));
+    assert_eq!(body["flags"], json!([]));
     {
         let seen = api.seen.lock().unwrap();
         let sent = &seen[0].1;
         assert!(sent["system"].as_str().unwrap().contains("last_opponent_action"));
+        assert!(sent["system"].as_str().unwrap().contains("Never assume silently"));
         let ask = sent["messages"][0]["content"].as_str().unwrap();
         assert!(ask.contains("Allowed decisions: C, D") && ask.contains("- D/C -> 5, 0") && ask.contains("never forgive"), "{ask}");
     }
+
+    // Flags are handed on for the editor to show.
+    api.say(&GRIM_JSON.replace("\"rationale\":\"Two states.\"", "\"rationale\":\"Two states.\",\"flags\":[{\"kind\":\"violation\",\"asked\":\"defect one time in ten\",\"why\":\"A strategy may not use chance.\",\"instead\":\"Left out.\",\"code\":false}]"));
+    let (status, flagged) = app.post("/api/strategies/compile", json!({ "prompt": "Cooperate until betrayed, but defect one time in ten anyway." })).await;
+    assert_eq!((status, flagged["valid"].as_bool()), (StatusCode::OK, Some(true)), "{flagged}");
+    assert_eq!(flagged["flags"], json!([{ "kind": "violation", "asked": "defect one time in ten", "why": "A strategy may not use chance.", "instead": "Left out.", "code": false }]));
+
+    // A description that rests on breaking the rules is refused under its own code.
+    api.say(r#"{"error": "A strategy may not know who its opponent is.", "breaks_rules": true}"#);
+    let (status, refused) = app.post("/api/strategies/compile", json!({ "prompt": "Read the description of my opponent and beat it." })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(refused["error"], json!({ "code": "rule_violation", "message": "A strategy may not know who its opponent is." }));
 
     // The compiled rules go straight into a save.
     let mut save = body["strategy"].clone();

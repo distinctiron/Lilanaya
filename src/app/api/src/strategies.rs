@@ -200,6 +200,23 @@ Guards (JSON objects; "own" is this strategy, "opponent" is the other player)
 - {"op": "rounds_left", "at_most": N}: at most N rounds are left in the match, counting the round about to be played (N >= 1). With N = 10 it is true in exactly the last 10 rounds.
 - {"op": "and", "all": [guards]}, {"op": "or", "any": [guards]}, {"op": "not", "guard": guard}.
 
+What no strategy may do (the rules of the game)
+- Use chance: no coin flips, no "sometimes", no probabilities. The same history always leads to the same decision.
+- See the opponent's decision for the round being played before deciding: both players decide at the same time.
+- Know who the opponent is, which strategy it follows or what it did in other matches. Every match starts from the initial state; nothing is remembered from one match to the next.
+- See or change anything outside its own match: other matches, the standings, the payoffs, the number of rounds.
+- Do anything but play one allowed decision in every round: no skipping a round, no messages, no deals.
+
+What this state machine cannot do, although a strategy written as code can
+- Count or compare over the whole match where states cannot hold the number: how often each player has played each decision so far, shares and percentages, majorities.
+- Use the score: either player's points so far, or who is ahead.
+- Arithmetic on the round number, the counts or the points.
+
+Never assume silently. Build the machine from the parts that can be done exactly. For a part that cannot, put the closest behaviour that is allowed in its place where there is one (for example "forgive one defection in ten at random" can become "forgive every tenth defection"), otherwise leave it out. Either way, raise a flag for that part in "flags". There are two kinds of flag:
+- "violation": the part asks for something the rules of the game forbid.
+- "assumption": anything else you had to decide for the player. Either the state machine cannot do the part exactly as asked, so you approximated it or left it out, or the description is vague or silent on something that changes how the strategy plays and a reasonable player could have meant something noticeably different from what you built.
+Do not flag a part the machine carries out exactly, and do not flag obvious readings.
+
 Answer with exactly one JSON object and nothing else: no code fence, no text before or after.
 {
   "name": a short name for the strategy,
@@ -208,14 +225,20 @@ Answer with exactly one JSON object and nothing else: no code fence, no text bef
   "initial_state": one of the states,
   "action_map": {state: decision} with an entry for every state,
   "transitions": [{"from": state, "to": state, "guard": guard}],
-  "rationale": two to four sentences on how the machine carries out the description, naming any part of the description you could not express and what you did instead
+  "rationale": two to four sentences on how the machine carries out the description,
+  "flags": [one entry for every flag raised; [] when the machine does exactly what was asked and nothing had to be assumed]
 }
+Each entry of "flags" is {"kind": "violation" or "assumption", "asked": that part of the description, in the player's own words, "why": one sentence for the player on which rule it breaks or why something had to be assumed, "instead": one sentence on what the machine does, or "Left out.", "code": true only when the part is clear but beyond the state machine and a strategy written as code could do exactly what was asked; false for a violation and false when the flag is about a vague or missing detail}.
 Use only decisions the world allows. Prefer the smallest machine that does what was asked, but carry out every part of the description: never leave a part out to keep the machine small.
-If the text is not a description of a strategy for this game, answer {"error": one sentence saying what is missing} instead."#;
+If the text is not a description of a strategy for this game, answer {"error": one sentence saying what is missing} instead. If it is one but it rests entirely on breaking the rules of the game, so that nothing is left to build (for example "read the description of my opponent and play whatever beats it"), answer {"error": one or two sentences saying which rule it breaks, "breaks_rules": true} instead.
+
+Strategies written as code, for the "code" field: a function called before every round with the round number, the number of rounds in the match, both players' previous decisions, the two streaks above, how often each player has played each decision so far, and both players' points so far. It may calculate freely with those. It is bound by the rules of the game above like any strategy."#;
 
 #[derive(Deserialize)]
 struct CompiledAnswer {
     error: Option<String>,
+    #[serde(default)]
+    breaks_rules: bool,
     name: Option<String>,
     description: Option<String>,
     states: Option<Vec<String>>,
@@ -223,19 +246,69 @@ struct CompiledAnswer {
     action_map: Option<BTreeMap<String, String>>,
     transitions: Option<Vec<lilanaya_engine::Transition>>,
     rationale: Option<String>,
+    flags: Option<Vec<Value>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlagKind {
+    /// The description asked for something the rules of the game forbid.
+    Violation,
+    /// The rules approximate what was asked, or the description left a choice open.
+    Assumption,
+}
+
+/// Something about the description the author has to know before trusting the rules.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Flag {
+    pub kind: FlagKind,
+    /// The part of the description, in the author's words.
+    pub asked: String,
+    pub why: String,
+    /// What the rules do instead.
+    pub instead: String,
+    /// Whether a code strategy could do exactly what was asked. Never true for a violation.
+    pub code: bool,
+}
+
+const MAX_FLAGS: usize = 10;
+const MAX_FLAG_CHARS: usize = 400;
+
+/// Read leniently: an entry that is only a sentence still gets shown.
+/// Violations come first.
+fn read_flags(entries: Vec<Value>) -> Vec<Flag> {
+    let text = |v: &Value| v.as_str().unwrap_or_default().trim().chars().take(MAX_FLAG_CHARS).collect::<String>();
+    let mut flags: Vec<Flag> = entries
+        .iter()
+        .map(|e| match e {
+            Value::String(_) => Flag { kind: FlagKind::Assumption, asked: text(e), why: String::new(), instead: String::new(), code: false },
+            _ => {
+                let kind = if e["kind"] == "violation" { FlagKind::Violation } else { FlagKind::Assumption };
+                Flag { kind, asked: text(&e["asked"]), why: text(&e["why"]), instead: text(&e["instead"]), code: kind == FlagKind::Assumption && e["code"] == true }
+            }
+        })
+        .filter(|f| !f.asked.is_empty() || !f.why.is_empty())
+        .take(MAX_FLAGS)
+        .collect();
+    flags.sort_by_key(|f| f.kind != FlagKind::Violation);
+    flags
 }
 
 pub enum CompileError {
     /// The description cannot be turned into a strategy; the message is for the user.
     NotAStrategy(String),
+    /// The description rests on breaking the rules of the game; the message says which.
+    BreaksRules(String),
     Llm(LlmError),
 }
 
 /// What compile hands back: rules to load into the editor, why the model
-/// built them that way, and any problems the validator still finds.
+/// built them that way, the flags raised about the description, and any
+/// problems the validator still finds.
 pub struct Compiled {
     pub strategy: Strategy,
     pub rationale: String,
+    pub flags: Vec<Flag>,
     pub errors: Vec<Issue>,
 }
 
@@ -261,11 +334,11 @@ fn extract_object(text: &str) -> Option<&str> {
     (end > start).then(|| &text[start..=end])
 }
 
-fn parse_answer(text: &str, decisions: &[String]) -> Result<Result<Compiled, String>, Vec<Issue>> {
+fn parse_answer(text: &str, decisions: &[String]) -> Result<Result<Compiled, CompileError>, Vec<Issue>> {
     let object = extract_object(text).ok_or_else(|| vec![Issue::new("", "the answer contained no JSON object")])?;
     let answer: CompiledAnswer = serde_json::from_str(object).map_err(|e| vec![Issue::new("", format!("the answer is not the JSON asked for: {e}"))])?;
     if let Some(error) = answer.error {
-        return Ok(Err(error));
+        return Ok(Err(if answer.breaks_rules { CompileError::BreaksRules(error) } else { CompileError::NotAStrategy(error) }));
     }
     let strategy = Strategy {
         id: "draft".into(),
@@ -277,7 +350,7 @@ fn parse_answer(text: &str, decisions: &[String]) -> Result<Result<Compiled, Str
         transitions: answer.transitions.unwrap_or_default(),
     };
     let errors = strategy.validate(decisions);
-    Ok(Ok(Compiled { strategy, rationale: answer.rationale.unwrap_or_default(), errors }))
+    Ok(Ok(Compiled { strategy, rationale: answer.rationale.unwrap_or_default(), flags: read_flags(answer.flags.unwrap_or_default()), errors }))
 }
 
 /// Asks the model for rules, checks them with the engine's validator and, if
@@ -289,7 +362,7 @@ pub async fn compile(llm: &Llm, world: &World, prompt: &str) -> Result<Compiled,
     let first = llm.complete(COMPILE_SYSTEM, &messages).await.map_err(CompileError::Llm)?;
 
     let problems = match parse_answer(&first, decisions) {
-        Ok(Err(not_a_strategy)) => return Err(CompileError::NotAStrategy(not_a_strategy)),
+        Ok(Err(refused)) => return Err(refused),
         Ok(Ok(compiled)) if compiled.errors.is_empty() => return Ok(compiled),
         Ok(Ok(compiled)) => compiled.errors,
         Err(problems) => problems,
@@ -300,7 +373,7 @@ pub async fn compile(llm: &Llm, world: &World, prompt: &str) -> Result<Compiled,
     let second = llm.complete(COMPILE_SYSTEM, &messages).await.map_err(CompileError::Llm)?;
     match parse_answer(&second, decisions) {
         Ok(Ok(compiled)) => Ok(compiled),
-        Ok(Err(not_a_strategy)) => Err(CompileError::NotAStrategy(not_a_strategy)),
+        Ok(Err(refused)) => Err(refused),
         Err(_) => Err(CompileError::Llm(LlmError::NoAnswer("The model did not produce usable rules; try describing the strategy differently".into()))),
     }
 }
@@ -360,12 +433,28 @@ mod tests {
         let compiled = parse_answer(fenced, &cd).unwrap().ok().unwrap();
         assert_eq!(compiled.strategy.name, "Grim");
         assert!(compiled.errors.is_empty());
+        assert_eq!(compiled.flags, vec![]);
+
+        // Flags come back as a list, violations first, however loosely the model wrote them.
+        let flags = r#"[{"kind":"assumption","asked":"when I am ahead","why":"Rules cannot see points.","code":true},{"kind":"violation","asked":"defect at random","why":"No chance.","instead":"Defects every tenth round.","code":true},"forgive on Sundays",{"asked":" "}]"#;
+        let flagged = fenced.replace("\"rationale\":\"r\"", &format!("\"rationale\":\"r\",\"flags\":{flags}"));
+        let compiled = parse_answer(&flagged, &cd).unwrap().ok().unwrap();
+        let shown: Vec<(FlagKind, &str, &str, bool)> = compiled.flags.iter().map(|f| (f.kind, f.asked.as_str(), f.instead.as_str(), f.code)).collect();
+        assert_eq!(
+            shown,
+            [
+                (FlagKind::Violation, "defect at random", "Defects every tenth round.", false),
+                (FlagKind::Assumption, "when I am ahead", "", true),
+                (FlagKind::Assumption, "forgive on Sundays", "", false),
+            ]
+        );
 
         let bad = fenced.replace("\"is\":\"D\"", "\"is\":\"X\"");
         let compiled = parse_answer(&bad, &cd).unwrap().ok().unwrap();
         assert_eq!(compiled.errors[0].path, "transitions[0].guard.is");
 
-        assert_eq!(parse_answer("{\"error\": \"That is a recipe.\"}", &cd).unwrap().err().unwrap(), "That is a recipe.");
+        assert!(matches!(parse_answer("{\"error\": \"That is a recipe.\"}", &cd).unwrap(), Err(CompileError::NotAStrategy(m)) if m == "That is a recipe."));
+        assert!(matches!(parse_answer("{\"error\": \"No knowing the opponent.\", \"breaks_rules\": true}", &cd).unwrap(), Err(CompileError::BreaksRules(m)) if m == "No knowing the opponent."));
         assert!(parse_answer("I cannot.", &cd).is_err());
     }
 }

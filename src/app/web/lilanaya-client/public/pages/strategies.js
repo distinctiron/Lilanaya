@@ -3,6 +3,8 @@ import { avatar, revealAvatar } from '../components/avatar.js';
 import { button, linkButton } from '../components/button.js';
 import { fold } from '../components/fold.js';
 import { codeBlock, machineTable } from '../components/machine.js';
+import { pager } from '../components/pager.js';
+import { screen, screenGroup, screens } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h, prefersReducedMotion } from '../dom.js';
 import { getUser, signInUrl } from '../session.js';
@@ -36,6 +38,7 @@ function card(s, { refresh }, face, open = false) {
 	// Folded: avatar, name and tags, so many strategies fit on a screen. Folded out: what it does.
 	return fold({
 		open,
+		group: 'strategy', // one open at a time, so a screen of strategies stays a screen
 		summary: [h('h3', { class: 'section-heading avatar-heading' }, [face ?? avatar(s.id, { size: 32 }), s.name]), h('span', { class: 'meta fold-tags' }, tags.join(' · '))],
 		body: [s.description ? h('p', null, s.description) : null, s.mode === 'code' ? codeBlock(s) : machineTable(s), actions, errors]
 	});
@@ -60,21 +63,42 @@ export async function strategiesPage(ctx) {
 		ctx.onLeave(() => clearInterval(timer));
 		requestAnimationFrame(() => freshCard.scrollIntoView({ block: 'nearest' }));
 	}
-	const group = (title, list) =>
-		list.length ? h('div', { class: 'stack' }, [sectionHeading(title), h('ul', { class: 'cards folds' }, list.map((s) => (s === fresh ? freshCard : card(s, ctx))))]) : null;
+	// Each group is a screen of its own; a group too long for the window is shown a page at a time.
+	const group = (title, list, reserve) => [
+		sectionHeading(title),
+		pager({
+			rowHeight: 60,
+			reserve,
+			start: Math.max(0, list.indexOf(fresh)),
+			rows: list.map((s) => (s === fresh ? freshCard : card(s, ctx))),
+			wrap: (rows) => h('ul', { class: 'cards folds' }, rows)
+		})
+	];
+	const intro = h('div', { class: 'stack' }, [
+		sectionHeading('Strategies', { level: 1 }),
+		h('p', { class: 'prose' }, 'A strategy decides what to play each round from what has happened so far. Most are rules: a few states, one decision per state, and conditions for moving between them. A strategy can also be written as code. Open a strategy to see how it works.'),
+		h('p', null, user ? linkButton('New strategy', '/strategies/new', { primary: true }) : linkButton('Sign in to make your own', signInUrl('/strategies/new'))),
+		user && !mine.length ? h('p', { class: 'meta' }, 'You have no strategies yet') : null
+	]);
+	const groups = [
+		['Your strategies', mine],
+		['Built in', builtin],
+		['From other players', others]
+	].filter(([, list]) => list.length);
 
 	return {
 		title: 'Strategies',
-		node: h('section', { class: 'stack-lg' }, [
-			h('div', { class: 'stack' }, [
-				sectionHeading('Strategies', { level: 1 }),
-				h('p', { class: 'prose' }, 'A strategy decides what to play each round from what has happened so far. Most are rules: a few states, one decision per state, and conditions for moving between them. A strategy can also be written as code. Open a strategy to see how it works.'),
-				h('p', null, user ? linkButton('New strategy', '/strategies/new', { primary: true }) : linkButton('Sign in to make your own', signInUrl('/strategies/new')))
-			]),
-			user && !mine.length ? h('p', { class: 'meta' }, 'You have no strategies yet') : null,
-			group('Your strategies', mine),
-			group('Built in', builtin),
-			group('From other players', others)
-		])
+		// The first screen opens with what a strategy is, then the first group; the other groups follow.
+		node: screens(
+			groups.length
+				? [
+						screen([intro, h('div', { class: 'stack' }, group(...groups[0], 520))], { class: 'stack-lg' }),
+						// Two groups left share a screen on a laptop, side by side.
+						groups.length === 3
+							? screenGroup(groups.slice(1).map(([title, list]) => screen(group(title, list, 240), { class: 'stack' })))
+							: groups.slice(1).map(([title, list]) => screen(group(title, list, 240), { class: 'stack' }))
+					]
+				: [screen([intro])]
+		)
 	};
 }

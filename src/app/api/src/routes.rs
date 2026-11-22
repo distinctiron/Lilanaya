@@ -55,6 +55,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/runs", get(list_runs).post(create_run))
         .route("/api/runs/{id}", get(get_run))
         .route("/api/runs/{id}/matches/{a}/{b}", get(get_match))
+        .route("/api/runs/{id}/race", get(get_race))
         .route("/api/runs/{id}/artifacts", get(list_artifacts))
         .route("/api/runs/{id}/artifacts/{*name}", get(get_artifact))
         .fallback(|| async { ApiError::not_found("This route") })
@@ -356,6 +357,49 @@ async fn get_match(State(state): Shared, viewer: Viewer, Path((id, a, b)): Path<
         "moves_a": moves_a,
         "moves_b": moves_b,
     })))
+}
+
+/// At most this many points per match in the race: enough for a smooth line, small enough to send for every match.
+const RACE_POINTS: usize = 60;
+
+/// What the race on the results page is drawn from: for every match, both
+/// sides' points so far at a number of sampled rounds.
+/// `rounds` are the round counts sampled (the last is the final round);
+/// `matches[i].totals[side][k]` is that side's points in the match after `rounds[k]` rounds.
+async fn get_race(State(state): Shared, viewer: Viewer, Path(id): Path<String>) -> ApiResult {
+    let run = find_run(&state, &id, &viewer).await?;
+    let r = run.result.as_ref().ok_or_else(|| ApiError::not_found(format!("Results of run {id}")))?;
+    let world = state.store.run_world(run.id).await?.ok_or_else(|| ApiError::internal(format!("run {} has no input", run.id)))?;
+    let traces = state.store.traces(run.id).await?;
+
+    let iterations = r.iterations as usize;
+    let points = iterations.min(RACE_POINTS);
+    let rounds: Vec<usize> = (1..=points).map(|k| (k * iterations).div_ceil(points)).collect();
+    // Payoffs by decision index, as the traces record them.
+    let payoffs: Vec<Vec<[i64; 2]>> = r
+        .decisions
+        .iter()
+        .map(|own| r.decisions.iter().map(|other| world.payoff.matrix.get(own).and_then(|row| row.get(other)).copied().unwrap_or([0, 0])).collect())
+        .collect();
+    let matches: Vec<Value> = traces
+        .iter()
+        .map(|(a, b, moves)| {
+            let (mut sum, mut next) = ([0i64; 2], 0usize);
+            let mut totals = [Vec::with_capacity(points), Vec::with_capacity(points)];
+            for (round, m) in moves.iter().enumerate() {
+                if let Some(won) = payoffs.get(m[0] as usize).and_then(|row| row.get(m[1] as usize)) {
+                    sum = [sum[0] + won[0], sum[1] + won[1]];
+                }
+                if next < points && round + 1 == rounds[next] {
+                    totals[0].push(sum[0]);
+                    totals[1].push(sum[1]);
+                    next += 1;
+                }
+            }
+            json!({ "a": a, "b": b, "totals": totals })
+        })
+        .collect();
+    Ok(Json(json!({ "run_id": run.id, "iterations": r.iterations, "rounds": rounds, "matches": matches })))
 }
 
 /// The run's manifest: the files it wrote to object storage, with size and

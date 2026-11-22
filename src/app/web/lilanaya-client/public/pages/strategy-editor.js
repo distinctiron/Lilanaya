@@ -2,9 +2,10 @@ import { ApiError, getJson, postJson, putJson } from '../api.js';
 import { button, linkButton } from '../components/button.js';
 import { describeGuard } from '../components/machine.js';
 import { roundStrip, stripLegend } from '../components/round-strip.js';
-import { avatar } from '../components/avatar.js';
+import { avatar, revealAvatar } from '../components/avatar.js';
+import { screen } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
-import { h } from '../dom.js';
+import { h, prefersReducedMotion } from '../dom.js';
 import { getUser } from '../session.js';
 import { signInPrompt } from './sign-in.js';
 
@@ -143,7 +144,7 @@ function fromModel(model) {
 
 // --- the page ---
 
-export async function strategyEditorPage({ params, navigate }) {
+export async function strategyEditorPage({ params, navigate, onLeave }) {
 	const user = await getUser();
 	if (!user) return { title: 'Strategy', node: signInPrompt(params.id ? 'edit a strategy' : 'make a strategy') };
 
@@ -167,37 +168,96 @@ export async function strategyEditorPage({ params, navigate }) {
 
 	// What the two modes add: `body` is the form, `draft()` the fields sent to the API.
 	const report = h('div', { class: 'stack', 'aria-live': 'polite' });
-	const kind = mode === 'code' ? codeFields(existing) : rulesFields(existing, { decisions, world, user, name, description, check: () => check() });
+	// A new rules strategy starts as a description only: its name, description and rules appear once rules have been written from it.
+	const staged = !existing && mode === 'rules' && Boolean(user.features?.compile);
+	const kind = mode === 'code' ? codeFields(existing) : rulesFields(existing, { decisions, world, user, name, description, staged, open: () => open(), check: () => check(), clearReport: () => clearReport() });
 
 	const draft = () => ({ name: name.value, description: description.value, mode, ...kind.draft() });
 
 	const showProblems = (message, details) =>
 		h('div', { class: 'error-box', role: 'alert' }, [h('p', null, message), details.length ? h('ul', null, details.map((d) => h('li', null, d.path ? `${d.path}: ${d.message}` : d.message))) : null]);
 
-	/** Asks the API to check the draft and play the sample matches; returns whether it is valid. */
+	/**
+	 * Asks the API to check the draft, then plays the sample matches round by round so it is plain that
+	 * something happened and how the strategy reacts. Returns whether the draft is valid, before the playing ends.
+	 */
+	let checks = 0; // a newer check, or leaving the page, stops an older one that is still playing
+	onLeave(() => (checks += 1));
 	async function check() {
+		const run = ++checks;
 		checkButton.disabled = true;
+		checkButton.textContent = 'Checking…';
+		const done = () => {
+			if (run !== checks) return;
+			checkButton.disabled = false;
+			checkButton.textContent = 'Check and preview';
+		};
 		try {
 			const result = await postJson('/api/strategies/preview', { world_id: world.id, strategy: draft() });
-			report.replaceChildren(h('div', { class: 'stack' }, previewReport(result, decisions, showProblems)));
+			if (run !== checks) return result.valid;
+			const view = previewReport(result, decisions, world, showProblems);
+			report.replaceChildren(h('div', { class: 'stack' }, view.nodes));
+			if (!result.valid) kind.showRules?.();
+			checkButton.textContent = 'Playing…';
+			view.play(() => run !== checks).then(done);
 			return result.valid;
 		} catch (error) {
 			if (!(error instanceof ApiError)) console.error(error);
 			report.replaceChildren(showProblems(error instanceof ApiError ? error.message : 'The strategy could not be checked.', error.details ?? []));
+			done();
 			return false;
-		} finally {
-			checkButton.disabled = false;
 		}
 	}
 
 	const checkButton = button('Check and preview', { onclick: check });
-	const saveButton = button(existing ? 'Save changes' : 'Save strategy', { primary: true, type: 'submit' });
+	const saveButton = button(existing ? 'Save changes' : 'Create strategy', { primary: true, type: 'submit' });
 	const saveErrors = h('div', { 'aria-live': 'assertive' });
 
-	const form = h(
+	// Side by side where there is room, so the first screen keeps its height for the strategy itself.
+	const details = h('div', { class: 'field-row editor-details', hidden: staged }, [
+		h('div', { class: 'field' }, [h('label', { class: 'field-label', for: 'strategy-name' }, 'Name'), name]),
+		h('div', { class: 'field' }, [h('label', { class: 'field-label', for: 'strategy-description' }, 'Description'), description])
+	]);
+	// The second screen: try the strategy out, say who may see it, and save.
+	const finish = screen(
+		[
+		h('div', { class: 'stack' }, [
+			sectionHeading('Preview'),
+			h('p', { class: 'meta' }, `Checks the strategy and plays ${decisions.length === 2 ? 'two' : 'some'} short sample matches, round by round · Uses none of your runs`),
+			h('div', null, checkButton),
+			report
+		]),
+		h('div', { class: 'field' }, [
+			h('label', { class: 'field-label', for: 'strategy-visibility' }, 'Who can see it'),
+			h('div', { class: 'form' }, visibility),
+			h('p', { class: 'meta', id: 'strategy-visibility-hint' }, 'Public strategies can be read and entered in runs by anyone · A run with a private strategy is private too')
+		]),
+		saveErrors,
+		h('div', { class: 'row' }, [saveButton, linkButton('Cancel', '/strategies')])
+		],
+		{ class: 'stack-md', hidden: staged }
+	);
+	/** Forgets an earlier preview: the rules it showed have been replaced. */
+	const clearReport = () => {
+		checks += 1;
+		checkButton.disabled = false;
+		checkButton.textContent = 'Check and preview';
+		report.replaceChildren();
+	};
+	// The way on from the first screen, since saving is a screen down.
+	const nextStep = h('div', { hidden: staged }, button('Next: preview and save', { onclick: () => finish.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }) }));
+	/** Brings in the name, the description and everything needed to finish. */
+	const open = () => {
+		details.hidden = false;
+		finish.hidden = false;
+		nextStep.hidden = false;
+	};
+
+	// The form is the page: a screen for writing the strategy, and one for trying it out and saving it.
+	const page = h(
 		'form',
 		{
-			class: 'stack-lg editor',
+			class: 'screens editor',
 			novalidate: true,
 			onsubmit: async (e) => {
 				e.preventDefault();
@@ -209,73 +269,152 @@ export async function strategyEditorPage({ params, navigate }) {
 						await putJson(`/api/strategies/${encodeURIComponent(existing.id)}`, body);
 						await navigate('/strategies');
 					} else {
-						// The list builds the new strategy's avatar when it is told which one is new.
+						// A new strategy is shown off before anything else: its avatar is built and turns on the spot.
 						const made = await postJson('/api/strategies', body);
-						await navigate(made?.id ? `/strategies?new=${encodeURIComponent(made.id)}` : '/strategies');
+						if (made?.id) page.replaceChildren(h('div', { class: 'screen' }, fighterReveal(made, onLeave)));
+						else await navigate('/strategies');
 					}
 				} catch (error) {
 					saveButton.disabled = false;
 					if (!(error instanceof ApiError)) console.error(error);
 					saveErrors.replaceChildren(showProblems(error instanceof ApiError ? error.message : 'The strategy could not be saved.', error.details ?? []));
-					if ((error.details ?? []).some((d) => d.path === 'name')) name.focus();
 				}
 			}
 		},
 		[
-			h('div', { class: 'field form' }, [h('label', { class: 'field-label', for: 'strategy-name' }, 'Name'), name]),
-			h('div', { class: 'field form' }, [h('label', { class: 'field-label', for: 'strategy-description' }, 'Description'), description]),
-			kind.body,
-			h('div', { class: 'stack' }, [
-				sectionHeading('Preview'),
-				h('p', { class: 'meta' }, `Checks the strategy and plays ${decisions.length === 2 ? 'two' : 'some'} short sample matches · Uses none of your runs`),
-				h('div', null, checkButton),
-				report
-			]),
-			h('div', { class: 'field form' }, [
-				h('label', { class: 'field-label', for: 'strategy-visibility' }, 'Who can see it'),
-				visibility,
-				h('p', { class: 'meta', id: 'strategy-visibility-hint' }, 'Public strategies can be read and entered in runs by anyone · A run with a private strategy is private too')
-			]),
-			saveErrors,
-			h('div', { class: 'row' }, [saveButton, linkButton('Cancel', '/strategies')])
+			screen(
+				[
+					h('div', { class: 'stack' }, [
+						h('div', { class: 'avatar-heading' }, [existing ? avatar(existing.id, { size: 40 }) : null, sectionHeading(title, { level: 1 })]),
+						h('p', { class: 'meta' }, `${mode === 'code' ? 'Code' : 'Rules'} · For ${world.metadata.name} · Decisions ${decisions.join(', ')}${existing ? '' : ' · Gets its avatar when created'}`)
+					]),
+					details,
+					kind.body,
+					nextStep
+				],
+				{ class: 'stack-md' }
+			),
+			finish
 		]
 	);
-
-	return {
-		title,
-		node: h('section', { class: 'stack-lg' }, [
-			h('div', { class: 'stack' }, [
-				h('div', { class: 'avatar-heading' }, [existing ? avatar(existing.id, { size: 40 }) : null, sectionHeading(title, { level: 1 })]),
-				h('p', { class: 'meta' }, `${mode === 'code' ? 'Code' : 'Rules'} · For ${world.metadata.name} · Decisions ${decisions.join(', ')}${existing ? '' : ' · Gets its avatar when saved'}`)
-			]),
-			form
-		])
-	};
+	return { title, node: page };
 }
 
-/** What the preview found: problems, warnings, and the sample matches as round strips. */
-function previewReport(result, decisions, showProblems) {
-	if (!result.valid) return [showProblems('This strategy cannot play yet:', result.errors)];
+const BLOCK_MS = 30; // one block of a new strategy's avatar
+
+/**
+ * Shows off a strategy that was just created: its avatar is built block by block on a floor
+ * line, then turns on the spot the way a fighter does on a select screen.
+ */
+function fighterReveal(s, onLeave) {
+	const still = prefersReducedMotion();
+	const face = avatar(s.id, { size: 192, build: !still, label: `The avatar of ${s.name}` });
+	const stand = h('div', { class: 'fighter-stand' }, [h('div', { class: 'fighter-turn' }, face), h('div', { class: 'fighter-floor', 'aria-hidden': 'true' })]);
+	if (!still) {
+		let shown = 0;
+		const timer = setInterval(() => {
+			if (revealAvatar(face, ++shown) > shown) return;
+			clearInterval(timer);
+			stand.classList.add('is-ready');
+		}, BLOCK_MS);
+		onLeave(() => clearInterval(timer));
+	}
+	const heading = sectionHeading('Your new competitor', { level: 1 });
+	heading.tabIndex = -1;
+	requestAnimationFrame(() => {
+		window.scrollTo(0, 0);
+		heading.focus({ preventScroll: true });
+	});
+	return h('div', { class: 'fighter stack-lg' }, [
+		heading,
+		stand,
+		h('div', { class: 'stack', role: 'status' }, [
+			h('p', { class: 'fighter-name' }, s.name),
+			s.description ? h('p', { class: 'prose' }, s.description) : null,
+			h('p', { class: 'meta' }, `${s.mode === 'code' ? 'Code' : 'Rules'} · ${s.visibility === 'public' ? 'Public' : 'Private'} · Created`)
+		]),
+		h('div', { class: 'row fighter-actions' }, [linkButton('Send it into a run', '/runs/new', { primary: true }), linkButton('All strategies', '/strategies'), linkButton('Edit', `/strategies/${encodeURIComponent(s.id)}/edit`)])
+	]);
+}
+
+/** Shown while the language model is writing rules: marching blocks and a blinking caret. */
+function workingBox() {
+	return h('div', { class: 'working', role: 'status' }, [
+		h('span', { class: 'working-blocks', 'aria-hidden': 'true' }, Array.from({ length: 8 }, () => h('span'))),
+		h('p', { class: 'working-title' }, ['Working on your rules', h('span', { class: 'working-caret', 'aria-hidden': 'true' })]),
+		h('p', { class: 'meta' }, 'Reading your description and writing rules from it · This can take half a minute')
+	]);
+}
+
+const ROUND_MS = 150; // one round of a sample match
+const BETWEEN_MS = 600; // the pause before the next sample match
+
+/**
+ * What the preview found: problems, warnings, and the sample matches as round strips.
+ * Returns `{ nodes, play(stopped) }`: `play` runs the matches one after the other, a round at a
+ * time, with the points adding up; without it (and under reduced motion) they are shown finished.
+ */
+function previewReport(result, decisions, world, showProblems) {
+	if (!result.valid) return { nodes: [showProblems('This strategy cannot play yet:', result.errors)], play: async () => {} };
 	const index = (moves) => moves.map((m) => decisions.indexOf(m));
-	return [
+	const points = (own, opponent) => world.payoff?.matrix?.[own]?.[opponent] ?? null;
+	const samples = result.samples.map((s) => {
+		const strip = roundStrip({
+			movesA: index(s.own_moves),
+			movesB: index(s.opponent_moves),
+			label: `Your strategy played ${s.own_moves.join(' ')}. ${s.opponent.name} played ${s.opponent_moves.join(' ')}.`
+		});
+		const score = h('span');
+		const caption = h('p', { class: 'meta preview-caption', 'aria-hidden': 'true' });
+		/** Shows the match as it stood after `k` rounds. */
+		const show = (k) => {
+			strip.show(k);
+			let totals = [0, 0];
+			for (let r = 0; r < k && totals; r++) {
+				const won = points(s.own_moves[r], s.opponent_moves[r]);
+				totals = won ? [totals[0] + won[0], totals[1] + won[1]] : null;
+			}
+			if (k >= s.rounds || !totals) totals = k >= s.rounds ? s.totals : null;
+			score.textContent = totals ? ` · You ${totals[0]}, them ${totals[1]}` : '';
+			caption.textContent =
+				k === 0 ? 'About to start' : k >= s.rounds ? `${s.rounds} rounds played` : `Round ${k} of ${s.rounds} · You played ${s.own_moves[k - 1]} · ${s.opponent.name} played ${s.opponent_moves[k - 1]}`;
+		};
+		show(s.rounds);
+		const node = h('div', { class: 'stack-sm preview-match' }, [h('p', null, [h('strong', null, `Against ${s.opponent.name}`), ` · ${s.rounds} rounds`, score]), strip.node, caption]);
+		return { node, show, rounds: s.rounds };
+	});
+	const nodes = [
 		h('p', { role: 'status' }, 'The strategy is valid.'),
 		result.warnings.length
 			? h('div', { class: 'notice' }, [h('p', null, 'Worth a look, though it will run:'), h('ul', null, result.warnings.map((w) => h('li', null, w.message)))])
 			: null,
-		result.samples.map((s) =>
-			h('div', { class: 'stack-sm' }, [
-				h('p', null, [h('strong', null, `Against ${s.opponent.name}`), ` · ${s.rounds} rounds · You ${s.totals[0]}, them ${s.totals[1]}`]),
-				roundStrip({
-					movesA: index(s.own_moves),
-					movesB: index(s.opponent_moves),
-					label: `Your strategy played ${s.own_moves.join(' ')}. ${s.opponent.name} played ${s.opponent_moves.join(' ')}.`
-				}).node
-			])
-		),
-		result.samples.length
+		samples.map((s) => s.node),
+		samples.length
 			? stripLegend({ top: 'your strategy', bottom: 'the opponent', solid: `Plays ${decisions[0]}`, hollow: decisions.length === 2 ? `Plays ${decisions[1]}` : 'Plays anything else' })
 			: null
 	];
+	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	const play = async (stopped) => {
+		if (prefersReducedMotion() || !samples.length) return;
+		for (const s of samples) {
+			s.show(0);
+			s.node.classList.add('is-waiting');
+		}
+		samples[0].node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+		for (const s of samples) {
+			s.node.classList.remove('is-waiting');
+			s.node.classList.add('is-playing');
+			for (let k = 1; k <= s.rounds; k++) {
+				await wait(ROUND_MS);
+				if (stopped()) return;
+				s.show(k);
+			}
+			s.node.classList.remove('is-playing');
+			await wait(BETWEEN_MS);
+			if (stopped()) return;
+		}
+	};
+	return { nodes, play };
 }
 
 // --- code mode ---
@@ -307,12 +446,64 @@ function codeFields(existing) {
 
 // --- rules mode ---
 
-function rulesFields(existing, { decisions, world, user, name, description, check }) {
+const FLAG_KINDS = {
+	violation: { title: 'Violates the rules', mark: 'X' },
+	assumption: { title: 'Made assumptions', mark: '!' }
+};
+
+/** One flag box: a coloured frame, a mark and a title that say what kind of attention is needed, then the details. */
+function flagBox(kind, children) {
+	const { title, mark } = FLAG_KINDS[kind];
+	return h('div', { class: `flag flag-${kind} stack-sm`, role: kind === 'violation' ? 'alert' : 'status' }, [
+		h('div', { class: 'flag-head' }, [h('span', { class: 'flag-mark', 'aria-hidden': 'true' }, mark), h('strong', { class: 'flag-title' }, title)]),
+		children
+	]);
+}
+
+/** The flags raised about a plain-English description, as one box per kind: rule violations first, then assumptions. */
+function flagBoxes(flags) {
+	const sentence = (text) => (/[.!?]$/.test(text) ? text : `${text}.`);
+	const parts = (n) => (n === 1 ? 'One part' : `${n} parts`);
+	const list = (items) =>
+		h(
+			'ul',
+			{ class: 'stack-sm' },
+			items.map((f) =>
+				h('li', null, [
+					f.asked ? h('strong', null, `“${f.asked}”`) : null,
+					f.why ? ` ${sentence(f.why)}` : null,
+					f.instead ? [' ', h('span', { class: 'flag-instead' }, 'In the rules:'), ` ${sentence(f.instead)}`] : null,
+					f.code ? ' A code strategy can do exactly this.' : null
+				])
+			)
+		);
+	const broken = flags.filter((f) => f.kind === 'violation');
+	const assumed = flags.filter((f) => f.kind !== 'violation');
+	return [
+		broken.length
+			? flagBox('violation', [h('p', null, `${parts(broken.length)} of your description ${broken.length === 1 ? 'asks' : 'ask'} for something no strategy may do. The rules do not do it.`), list(broken)])
+			: null,
+		assumed.length
+			? flagBox('assumption', [
+					h('p', null, `${parts(assumed.length)} of your description could not be followed to the letter, so a choice was made for you. Check that it is what you meant.`),
+					list(assumed),
+					assumed.some((f) => f.code)
+						? h('p', null, ['Rules cannot do everything code can: ', h('a', { href: '/strategies/new/code', target: '_blank', rel: 'noopener' }, 'write it as code instead (opens a new tab)'), '.'])
+						: null
+				])
+			: null
+	].filter(Boolean);
+}
+
+function rulesFields(existing, { decisions, world, user, name, description, staged, open, check, clearReport }) {
 	let model = toModel(existing, decisions);
 	const box = h('div', { class: 'stack-lg' });
+	const rulesCount = h('span');
 
 	/** Redraws the states, then puts keyboard focus on the element `focus` finds. */
 	const draw = (focus) => {
+		const moves = model.states.reduce((n, state) => n + state.moves.length, 0);
+		rulesCount.textContent = `${model.states.length} ${model.states.length === 1 ? 'state' : 'states'} · ${moves} ${moves === 1 ? 'move' : 'moves'}`;
 		box.replaceChildren(...model.states.map(stateCard), h('div', null, button('Add a state', { onclick: addState, 'data-role': 'add-state' })));
 		focus?.(box)?.focus();
 	};
@@ -491,62 +682,134 @@ function rulesFields(existing, { decisions, world, user, name, description, chec
 	}
 
 	// Plain English: the description is sent to the language model, and the rules it answers with replace the ones below.
+	// When `staged`, the description is all there is at first; the name, the description and the rules are brought in
+	// once rules have been written, and only after the author has accepted any flags.
 	const canCompile = Boolean(user.features?.compile);
+	let opened = !staged;
+	let generated = { name: '', description: '' };
+	const openHint = canCompile ? 'Optional · Replaces the rules below · You can still edit them by hand afterwards' : 'Not available on this server · Build the rules by hand below';
+	const hint = h('p', { class: 'meta', id: 'strategy-prompt-hint' }, staged ? 'Press Enter to turn it into rules · Shift + Enter for a new line' : openHint);
 	const prompt = h(
 		'textarea',
-		{ id: 'strategy-prompt', maxlength: '2000', rows: '3', 'aria-describedby': 'strategy-prompt-hint', placeholder: 'Cooperate at first. If the opponent defects twice in a row, defect until they cooperate again.' },
+		{
+			id: 'strategy-prompt',
+			maxlength: '2000',
+			rows: '3',
+			'aria-describedby': 'strategy-prompt-hint',
+			placeholder: 'Cooperate at first. If the opponent defects twice in a row, defect until they cooperate again.',
+			// Enter sends the description only while it is all there is: later it would replace rules edited by hand.
+			onkeydown: (e) => {
+				if (opened || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+				e.preventDefault();
+				if (!compileButton.disabled) compileButton.click();
+			}
+		},
 		existing?.prompt ?? ''
 	);
 	const compileNote = h('div', { 'aria-live': 'polite' });
-	const compileButton = button('Turn into rules', {
-		disabled: !canCompile,
-		onclick: async () => {
-			compileNote.replaceChildren();
-			compileButton.disabled = true;
-			compileButton.textContent = 'Working…';
-			try {
-				const result = await postJson('/api/strategies/compile', { world_id: world.id, prompt: prompt.value });
-				model = toModel(result.strategy, decisions);
-				if (!name.value.trim()) name.value = result.strategy.name;
-				if (!description.value.trim()) description.value = result.strategy.description;
-				draw();
-				compileNote.replaceChildren(
-					h('div', { class: 'notice stack-sm' }, [
-						h('p', null, [h('strong', null, 'Rules written from your description.'), ' Read them below and change anything that is not what you meant.']),
-						result.rationale ? h('p', null, result.rationale) : null
-					])
-				);
-				await check();
-			} catch (error) {
-				if (!(error instanceof ApiError)) console.error(error);
-				const message = error instanceof ApiError ? (error.details[0] ? `The description ${error.details[0].message}.` : error.message) : 'The description could not be turned into rules.';
-				compileNote.replaceChildren(h('div', { class: 'error-box', role: 'alert' }, h('p', null, message)));
-			}
-			compileButton.disabled = false;
-			compileButton.textContent = 'Turn into rules';
-		}
-	});
-
-	draw();
-	const body = h('div', { class: 'stack-lg' }, [
-		h('div', { class: 'stack' }, [
-			h('div', { class: 'field' }, [
-				h('label', { class: 'field-label', for: 'strategy-prompt' }, 'Describe it in plain English'),
-				prompt,
-				h(
-					'p',
-					{ class: 'meta', id: 'strategy-prompt-hint' },
-					canCompile ? 'Optional · Replaces the rules below · You can still edit them by hand afterwards' : 'Not available on this server · Build the rules by hand below'
-				)
-			]),
-			h('div', null, compileButton),
-			compileNote
-		]),
-		h('div', { class: 'stack' }, [
-			sectionHeading('Rules'),
+	// The rules are folded away unless they are the only way in: written from a description, they are detail to look at on request.
+	const rulesFold = h('details', { open: !canCompile || (existing && !existing.prompt) ? '' : null }, [
+		h('summary', null, [h('span', { class: 'section-heading' }, 'Rules'), h('span', { class: 'meta fold-tags' }, [rulesCount, ' · Open to read or change them'])]),
+		h('div', { class: 'fold-body stack-lg' }, [
 			h('p', { class: 'prose' }, 'The strategy is always in one state and plays that state’s decision. Before each round it may move to another state, depending on what happened in the round before.'),
 			box
 		])
 	]);
-	return { body, draft: () => ({ ...fromModel(model), ...(prompt.value.trim() ? { prompt: prompt.value } : {}) }) };
+	const rulesSection = h('div', { class: 'card fold', hidden: staged }, rulesFold);
+
+	/** Puts the generated name and description in their fields, unless the author has written their own. */
+	const fill = (strategy) => {
+		if (!name.value.trim() || name.value === generated.name) name.value = strategy.name;
+		if (!description.value.trim() || description.value === generated.description) description.value = strategy.description;
+		generated = { name: strategy.name, description: strategy.description };
+	};
+	/** Brings in the name, the description, the rules and the rest of the form. */
+	const openUp = () => {
+		opened = true;
+		rulesSection.hidden = false;
+		byHand.hidden = true;
+		hint.textContent = openHint;
+		open();
+	};
+
+	const byHand = button('Build the rules by hand instead', {
+		hidden: !staged,
+		onclick: () => {
+			openUp();
+			rulesFold.open = true;
+		}
+	});
+	const compileButton = button('Turn into rules', {
+		disabled: !canCompile,
+		primary: staged,
+		onclick: async () => {
+			compileNote.replaceChildren(workingBox());
+			compileButton.disabled = true;
+			byHand.disabled = true;
+			prompt.readOnly = true;
+			try {
+				const result = await postJson('/api/strategies/compile', { world_id: world.id, prompt: prompt.value });
+				model = toModel(result.strategy, decisions);
+				draw();
+				const flags = result.flags ?? [];
+				const written = h('div', { class: 'notice stack-sm' }, [
+					h('p', null, [h('strong', null, 'Rules written from your description.'), ' They are folded away under Rules below: open that to read them or change anything that is not what you meant. Press Check and preview to watch them play.']),
+					result.rationale ? h('p', null, result.rationale) : null
+				]);
+				/** Shows the name and description that were generated, and brings in the rest of the form. */
+				const finish = async (first) => {
+					fill(result.strategy);
+					if (first) {
+						openUp();
+						name.focus();
+					}
+					// Rules the validator still rejects are reported at once; rules that pass are played when the author asks.
+					if (!result.valid) await check();
+					else clearReport();
+				};
+				if (!opened && flags.length) {
+					// Nothing is named or shown as rules until the author has read the flags and chosen to go on.
+					const gate = h('div', { class: 'stack-sm flag-gate' }, [
+						h('p', null, 'Continue if that is what you want, or change the description and try again.'),
+						h('div', { class: 'row' }, [
+							button('Continue with these rules', {
+								primary: true,
+								onclick: async () => {
+									gate.replaceWith(written);
+									await finish(true);
+								}
+							}),
+							button('Change the description', { onclick: () => prompt.focus() })
+						])
+					]);
+					compileNote.replaceChildren(...flagBoxes(flags), gate);
+				} else {
+					compileNote.replaceChildren(...flagBoxes(flags), written);
+					await finish(!opened);
+				}
+			} catch (error) {
+				if (!(error instanceof ApiError)) console.error(error);
+				const message = error instanceof ApiError ? (error.details[0] ? `The description ${error.details[0].message}.` : error.message) : 'The description could not be turned into rules.';
+				compileNote.replaceChildren(
+					error instanceof ApiError && error.code === 'rule_violation'
+						? flagBox('violation', [h('p', null, message), h('p', null, 'No rules were written. Change the description and try again.')])
+						: h('div', { class: 'error-box', role: 'alert' }, h('p', null, message))
+				);
+			}
+			compileButton.disabled = false;
+			byHand.disabled = false;
+			prompt.readOnly = false;
+		}
+	});
+
+	draw();
+	const body = h('div', { class: 'stack-md' }, [
+		h('div', { class: 'stack' }, [
+			h('div', { class: 'field' }, [h('label', { class: 'field-label', for: 'strategy-prompt' }, staged ? 'Describe your strategy in plain English' : 'Describe it in plain English'), prompt, hint]),
+			h('div', { class: 'row' }, [compileButton, byHand]),
+			compileNote
+		]),
+		rulesSection
+	]);
+	return { body, showRules: () => (rulesFold.open = true), draft: () => ({ ...fromModel(model), ...(prompt.value.trim() ? { prompt: prompt.value } : {}) }) };
 }

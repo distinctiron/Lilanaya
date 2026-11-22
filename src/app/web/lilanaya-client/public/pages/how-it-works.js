@@ -44,10 +44,10 @@ function miniStrip(rounds = ROUNDS) {
 	};
 }
 
-/** A ranked row: place, avatar, bar, score. Blue bar = never defects first, magenta = defects first, as on the result screens. */
+/** A ranked row: place, avatar, bar, score. */
 function boardRow(id, { hollow = false, you = false } = {}) {
 	const rank = px('', 'board-rank');
-	const bar = h('span', { class: hollow ? 'bar' : 'bar bar-solid' });
+	const bar = h('span', { class: 'bar' });
 	const score = px('0', 'board-score');
 	const node = h('div', { class: you ? 'board-row is-you' : 'board-row' }, [rank, avatar(id, { size: 24 }), h('span', { class: 'board-track' }, bar), score]);
 	return {

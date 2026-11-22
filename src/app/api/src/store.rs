@@ -465,6 +465,23 @@ impl Store {
         sqlx::query(&sql).bind(world_id).bind(run_id).fetch_optional(&self.pool).await?.map(run_row).transpose()
     }
 
+    /// Every pairing of a run with its rounds: `(a, b, moves)`, one `[a's move, b's move]` per round.
+    pub async fn traces(&self, run_id: i64) -> Result<Vec<(String, String, Vec<[u8; 2]>)>, sqlx::Error> {
+        let rows = sqlx::query("SELECT a, b, moves FROM run_traces WHERE run_id = $1 ORDER BY a, b").bind(run_id).fetch_all(&self.pool).await?;
+        rows.iter()
+            .map(|r| {
+                let bytes: Vec<u8> = r.try_get("moves")?;
+                Ok((r.try_get("a")?, r.try_get("b")?, bytes.chunks_exact(2).map(|c| [c[0], c[1]]).collect()))
+            })
+            .collect()
+    }
+
+    /// The world a run was played in, as frozen when the run was queued.
+    pub async fn run_world(&self, run_id: i64) -> Result<Option<World>, sqlx::Error> {
+        let row = sqlx::query("SELECT input FROM runs WHERE id = $1").bind(run_id).fetch_optional(&self.pool).await?;
+        row.map(|r| Ok(r.try_get::<Json<RunInput>, _>("input")?.0.world)).transpose()
+    }
+
     /// The rounds of the pairing stored as `(a, b)`: one `[a's move, b's move]` per round.
     pub async fn trace(&self, run_id: i64, a: &str, b: &str) -> Result<Option<Vec<[u8; 2]>>, sqlx::Error> {
         let row = sqlx::query("SELECT moves FROM run_traces WHERE run_id = $1 AND a = $2 AND b = $3")

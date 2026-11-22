@@ -1,6 +1,7 @@
 /* Lilanaya — the "Arcade" direction. Source of truth: spec/docs/design/visual-direction.md.
    Black field, white blocks, pixel display type, dashed dividers. No gradients, shadows or
    rounded corners. Two signal colours only: blue = cooperate, magenta = defect.
+   Two flag colours, on flags only: red = breaks the rules, yellow = an assumption was made.
    A winner is raised: nudged up and left over a hard-edged block shadow, never blurred.
    Everything else stays black, white and grey. */
 
@@ -36,6 +37,9 @@
 	/* Signal colours. Used for moves only, never for decoration or body text. */
 	--coop: #3fc5f0; /* cooperate (in other worlds: the first decision) */
 	--defect: #e25bd8; /* defect (any other decision); a colour without a verdict: neither move is the wrong one */
+	/* Flag colours. A verdict on purpose, so only ever on a flag: its frame, mark and title. */
+	--alert: #ff4d4d; /* breaks the rules */
+	--caution: #ffd23f; /* an assumption was made */
 	--raise: 4px; /* how far a winner stands out from the field */
 	--lane: #1c1c1c; /* the band behind whatever belongs to the visitor in a game played by hand */
 	--font-display: 'Press Start 2P', monospace;
@@ -48,6 +52,10 @@
 *::before,
 *::after {
 	box-sizing: border-box;
+}
+
+[hidden] {
+	display: none !important;
 }
 
 body {
@@ -202,6 +210,119 @@ main {
 	color: var(--muted);
 }
 
+/* --- screens (components/screen.js) ---
+   Every page is a column of screens. A screen is as tall as the window and holds one thing to look
+   at, in the middle; letting go of a scroll settles on the nearest screen, never in between. What is
+   on a screen is sized to fit it (long lists are paged, charts take the height that is left); a
+   screen that still ends up taller than the window can be scrolled through. */
+main:has(> .screens) {
+	padding-block: 0; /* the screens bring their own room */
+}
+
+.screens {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.screen {
+	display: flex;
+	flex-direction: column;
+	justify-content: safe center;
+	min-width: 0;
+	min-height: 100svh;
+	padding-block: var(--gutter);
+	scroll-snap-align: start;
+}
+
+/* The first screen shares the window with the header, so it settles by its bottom edge: the top of the page. */
+.screens > .screen:first-child,
+.screens > .screen-group:first-child > .screen:first-child {
+	min-height: calc(100svh - var(--header-height, 71px));
+	scroll-snap-align: end;
+}
+
+/* The top of the page is always a place to rest, also when the first screen is taller than the window. */
+html:has(.screens) #header {
+	scroll-snap-align: start;
+}
+
+/* On a wide window, screens that would each be mostly empty share one (components/screen.js, screenGroup):
+   side by side, tops level, the group in the middle of the window. Narrow, each is its own screen again. */
+.screen-group {
+	display: contents;
+}
+
+@media (min-width: 901px) {
+	.screen-group {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		align-items: start;
+		align-content: safe center;
+		gap: 40px;
+		min-height: 100svh;
+		padding-block: var(--gutter);
+		scroll-snap-align: start;
+	}
+
+	.screen-group.wide-left {
+		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+	}
+
+	.screen-group:first-child {
+		min-height: calc(100svh - var(--header-height, 71px));
+		scroll-snap-align: end;
+	}
+
+	.screens > .screen-group > .screen,
+	.screens > .screen-group:first-child > .screen:first-child {
+		justify-content: flex-start;
+		min-height: 0;
+		padding-block: 0;
+		scroll-snap-align: none;
+	}
+
+	.screen-group > .span {
+		grid-column: 1 / -1;
+	}
+
+	/* A match shown beside the table it was picked from: smaller numbers, and twenty rounds to a line. */
+	.screen-group .match-score {
+		font-size: clamp(32px, 4vw, 56px);
+	}
+
+	.screen-group .round-strip {
+		grid-template-columns: repeat(20, minmax(0, 28px));
+	}
+
+	.screen-group .match-note {
+		display: none;
+	}
+
+	/* The next screen is beside this one, not below it. */
+	.screen-group .next-step {
+		display: none;
+	}
+}
+
+/* A screen with nothing picked yet is only worth its place next to what it is picked from. */
+@media (max-width: 900px) {
+	.screen.is-empty {
+		display: none;
+	}
+}
+
+.pager-nav {
+	gap: 14px;
+}
+
+/* Short descriptions side by side: the baseline actors of a world. */
+.actor-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+	gap: 20px 40px;
+}
+
 /* Anything wider than a phone scrolls inside its own box. */
 .scroll-box {
 	overflow-x: auto;
@@ -351,6 +472,12 @@ main {
 	gap: 14px;
 }
 
+/* Long unbroken names (file names, ids) break rather than push the page wider than the screen. */
+.plain-list li {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
 .plain-list.tight {
 	gap: 6px;
 }
@@ -460,14 +587,344 @@ table {
 	border-left: 8px dashed var(--fg);
 }
 
+/* Narrow screens: a wide table (`.stacks`) turns each row into a block, one labelled line per cell,
+   so nothing has to scroll sideways. Cells carry their column heading in `data-label`. */
+@media (max-width: 600px) {
+	.grid-table.stacks,
+	.grid-table.stacks tbody,
+	.grid-table.stacks tr {
+		display: block;
+		width: 100%;
+	}
+
+	.grid-table.stacks thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.grid-table.stacks tr {
+		margin-bottom: 10px;
+		border: 3px solid var(--fg);
+	}
+
+	.grid-table.stacks th,
+	.grid-table.stacks td {
+		display: flex;
+		justify-content: space-between;
+		gap: 14px;
+		padding: 6px 10px;
+		border: 0;
+		text-align: right;
+		overflow-wrap: anywhere;
+	}
+
+	.grid-table.stacks td[data-label]::before {
+		content: attr(data-label);
+		flex: none;
+		color: var(--muted);
+		font: 400 14px/1.5 var(--font-body);
+		text-transform: uppercase;
+	}
+}
+
+/* Narrow screens: the high-score table gives up fixed column widths so it fits without scrolling. */
+@media (max-width: 600px) {
+	.bars th,
+	.bars td {
+		padding-right: 8px;
+	}
+
+	.bars .rank {
+		width: 20px;
+	}
+
+	.bars .name {
+		width: 42%;
+	}
+
+	.bars .score,
+	.bars .score-head {
+		width: 58px;
+	}
+
+	.bars .avatar-name {
+		gap: 6px;
+		overflow-wrap: anywhere;
+	}
+}
+
+/* --- the race: a run as a season of match days --- */
+
+/* The fixtures of the match day being played, above the chart; gone once the season is over. */
+.fixtures {
+	display: grid;
+	gap: 12px;
+	padding: 14px;
+	border: 3px solid var(--fg);
+}
+
+.fixtures-title {
+	font: 13px/1.4 var(--font-display);
+	text-transform: uppercase;
+}
+
+.fixtures-list {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* Home name, home score, dash, away score, away name: the scores meet in the middle. */
+.fixture {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(5ch, max-content) max-content minmax(5ch, max-content) minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+	color: var(--muted);
+}
+
+.fixture-side {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.fixture-home {
+	text-align: right;
+}
+
+.fixture-home .avatar-name {
+	flex-direction: row-reverse;
+	text-align: right;
+}
+
+.fixture-score {
+	color: var(--fg);
+	font: 14px/1.4 var(--font-display);
+	font-variant-numeric: tabular-nums;
+}
+
+.fixture-home + .fixture-score {
+	text-align: right;
+}
+
+/* At the whistle the side with more points turns white and its name is underlined. */
+.fixture.home-won .fixture-home,
+.fixture.away-won .fixture-away {
+	color: var(--fg);
+	text-decoration: underline;
+	text-underline-offset: 4px;
+}
+
+.fixtures-bench {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.fixtures.is-wiping {
+	animation: fixtures-wipe 0.35s steps(7) forwards;
+}
+
+@keyframes fixtures-wipe {
+	to {
+		clip-path: inset(0 0 0 100%);
+	}
+}
+
+@media (max-width: 600px) {
+	.fixture {
+		gap: 6px;
+		font-size: 12px;
+	}
+
+	.fixture-score {
+		font-size: 11px;
+	}
+
+	.fixture .avatar {
+		display: none;
+	}
+}
+
+
+/* The race fills what its screen has left: the chart is drawn to the height of its frame, so the
+   fixtures, the chart and the caption stay inside the window together. */
+.race {
+	flex: 1 1 auto;
+	max-height: 760px;
+	margin: 0;
+}
+
+/* While fixtures are on show the small print under the race makes way for the chart. */
+.race-screen:has(.fixtures:not([hidden])) > .meta:last-child {
+	display: none;
+}
+
+.race-frame {
+	position: relative;
+	flex: 1 1 0;
+	min-height: 180px;
+}
+
+.race-chart {
+	position: absolute;
+	inset: 0;
+	display: block;
+	max-width: 100%;
+}
+
+.race-grid {
+	stroke: var(--ghost);
+	stroke-width: 1;
+}
+
+.race-axis {
+	stroke: var(--muted);
+	stroke-width: 1;
+}
+
+.race-cursor {
+	stroke: var(--muted);
+	stroke-width: 1;
+	stroke-dasharray: 4 4;
+}
+
+.race-tick {
+	fill: var(--muted);
+	font: 12px var(--font-body);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Lines are grey, the leader white; a roll-call makes one line white and thick and dims the rest. */
+.race-line {
+	stroke: var(--muted);
+	stroke-width: 2;
+	stroke-linejoin: round;
+}
+
+.race-dot {
+	fill: var(--muted);
+}
+
+.race-line.is-leading,
+.race-line.is-called,
+.race-line.is-pointed {
+	stroke: var(--fg);
+}
+
+.race-line.is-called,
+.race-line.is-pointed {
+	stroke-width: 4;
+}
+
+.race-dot.is-leading,
+.race-dot.is-called,
+.race-dot.is-pointed {
+	fill: var(--fg);
+}
+
+/* What is pointed at: a wide unseen copy of each line, and its end label. */
+.race-hit {
+	stroke: transparent;
+	stroke-width: 16;
+	pointer-events: stroke;
+	cursor: pointer;
+}
+
+.race-label {
+	cursor: default;
+}
+
+.race-label.is-pointed {
+	color: var(--fg);
+	fill: var(--fg);
+}
+
+/* The finished chart can be clicked: the column of the match day that was picked is lit. */
+.race:not(.is-playing) .race-chart {
+	cursor: pointer;
+}
+
+.race-day {
+	fill: var(--lane);
+}
+
+.race-days {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.race-day-button {
+	min-width: 44px;
+	padding-inline: 10px;
+}
+
+.race-day-button[aria-pressed='true'] {
+	background: var(--fg);
+	color: var(--bg);
+}
+
+.race-line.is-dimmed,
+.race-dot.is-dimmed,
+.race-label.is-dimmed {
+	opacity: 0.35;
+}
+
+.race-label {
+	color: var(--muted);
+	fill: var(--muted);
+}
+
+.race-label.is-leading,
+.race-label.is-called {
+	color: var(--fg);
+	fill: var(--fg);
+}
+
+.race-plate {
+	fill: none;
+}
+
+.race-label.is-called .race-plate {
+	fill: var(--fg);
+}
+
+.race-label.is-called {
+	color: var(--bg);
+	fill: var(--bg);
+}
+
+.race-name {
+	font: 600 12px var(--font-body);
+}
+
+.race-total {
+	font: 12px var(--font-body);
+	font-variant-numeric: tabular-nums;
+}
+
+.race-caption {
+	min-height: 3em; /* two lines, so the page does not jump as the caption changes */
+	font: 13px/1.5 var(--font-display);
+	text-transform: uppercase;
+}
+
 /* --- round strip --- */
 
 .round-strip {
 	display: grid;
-	grid-template-columns: repeat(var(--rounds), minmax(0, 1fr));
-	gap: 5px;
-	/* Squares stay between 13px and 28px wide however many rounds are shown. */
-	min-width: min(720px, calc(var(--rounds) * 18px));
+	/* Squares are 18px to 28px wide. Where the rounds do not fit on one line they carry on on the next,
+	   so the strip never needs scrolling sideways. */
+	grid-template-columns: repeat(auto-fit, minmax(18px, 28px));
+	gap: 14px 5px;
 	max-width: calc(var(--rounds) * 33px);
 }
 
@@ -526,7 +983,7 @@ table {
 
 .bars {
 	width: 100%;
-	min-width: 440px;
+	max-width: 860px;
 	border-collapse: separate;
 	border-spacing: 0 14px;
 	margin: -14px 0;
@@ -562,22 +1019,11 @@ table {
 	text-align: right;
 }
 
-.bars .label,
-.bars thead th:last-child {
-	width: 120px;
-	padding-right: 0;
-	text-transform: uppercase;
-}
-
+/* A score bar: white, whatever the competitor does. Its length is the score and nothing else. */
 .bar {
 	height: 20px;
-	border: 3px solid var(--defect);
-	background: var(--defect);
-}
-
-.bar-solid {
-	border-color: var(--coop);
-	background: var(--coop);
+	border: 3px solid var(--fg);
+	background: var(--fg);
 }
 
 .bar-plain {
@@ -587,18 +1033,35 @@ table {
 
 /* --- head to head --- */
 
+/* The head-to-head table always fits its box: the cells share the width, and the lettering shrinks with them. */
+.matrix-box {
+	container-type: inline-size;
+	max-width: 100%;
+}
+
 .matrix {
 	border-collapse: separate;
-	border-spacing: 5px;
-	margin: -5px;
-	width: calc(100% + 10px);
-	min-width: calc((var(--n) + 1) * 64px);
+	border-spacing: clamp(2px, 0.6cqw, 5px);
+	width: 100%;
+	max-width: calc((var(--n) + 1) * 110px);
 	table-layout: fixed;
+	font-size: clamp(8px, calc(100cqw / (var(--n) + 1) / 3.4), 14px);
+}
+
+.matrix .avatar {
+	width: clamp(12px, calc(100cqw / (var(--n) + 1) / 2), 24px);
+	height: auto;
+	aspect-ratio: 1;
+}
+
+/* Rows share the window's height too: a big field gets lower rows rather than a table taller than the screen. */
+.matrix {
+	--cell: clamp(26px, calc((100svh - 300px) / (var(--n) + 1)), 44px);
 }
 
 .matrix th,
 .matrix td {
-	height: 44px;
+	height: var(--cell);
 	padding: 0;
 	text-align: center;
 	color: var(--muted);
@@ -616,7 +1079,7 @@ table {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	height: 44px;
+	height: var(--cell);
 	color: inherit;
 	text-decoration: none;
 }
@@ -691,7 +1154,7 @@ textarea {
 }
 
 textarea.code-input {
-	min-height: 320px;
+	min-height: clamp(160px, 100svh - 700px, 420px); /* with the name and description above it, one screen */
 	white-space: pre;
 	overflow: auto;
 	tab-size: 2;
@@ -722,6 +1185,41 @@ input[aria-invalid='true'] {
 	cursor: pointer;
 }
 
+/* Many choices side by side, each with a note of at most two lines, so the field fits a screen. */
+.check-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+	gap: 0 32px;
+}
+
+.check-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.check-note {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+}
+
+/* A short window keeps one line of each note. */
+@media (max-height: 800px) {
+	.check-note {
+		-webkit-line-clamp: 1;
+	}
+}
+
+.editor-details > .field:last-child {
+	flex-grow: 2;
+}
+
+.editor-details textarea {
+	min-height: 68px;
+}
+
 /* Checked: a solid block inset in the frame. */
 .check input:checked {
 	padding: 3px;
@@ -748,6 +1246,192 @@ input[aria-invalid='true'] {
 	margin-top: 8px;
 	padding-left: 20px;
 	list-style: square;
+}
+
+/* Flags: something the author has to read before going on. Red breaks the rules, yellow is an assumption;
+   the mark (X or !) and the title say the same without colour. */
+.flag {
+	--flag: var(--caution);
+	padding: 14px;
+	border: 4px solid var(--flag);
+}
+
+.flag-violation {
+	--flag: var(--alert);
+}
+
+.flag + .flag,
+.flag + .notice {
+	margin-top: 12px;
+}
+
+.flag-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.flag-mark {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	background: var(--flag);
+	color: var(--bg);
+	font-family: var(--font-display);
+	font-size: 16px;
+	line-height: 1;
+}
+
+.flag-title {
+	color: var(--flag);
+	font-family: var(--font-display);
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+.flag ul {
+	padding-left: 20px;
+	list-style: square;
+}
+
+.flag li::marker {
+	color: var(--flag);
+}
+
+.flag-instead {
+	color: var(--muted);
+}
+
+/* Sample matches in the preview: the one being played stands out, the ones still to come are dimmed. */
+.preview-match.is-waiting {
+	opacity: 0.4;
+}
+
+.preview-match.is-playing .preview-caption {
+	color: var(--fg);
+}
+
+/* Only the match being played says where it is, so the preview keeps its height from start to end. */
+.preview-match:not(.is-playing) .preview-caption {
+	display: none;
+}
+
+.flag-gate {
+	margin-top: 12px;
+}
+
+/* Working: shown while rules are being written from a description. Lit blocks march along the row. */
+.working {
+	display: grid;
+	gap: 10px;
+	padding: 14px;
+	border: 3px solid var(--fg);
+}
+
+.working-blocks {
+	display: flex;
+	gap: 6px;
+}
+
+.working-blocks span {
+	width: 18px;
+	height: 18px;
+	border: 3px solid var(--fg);
+	animation: working 1.6s steps(1) infinite;
+}
+
+.working-blocks span:nth-child(2) { animation-delay: 0.2s; }
+.working-blocks span:nth-child(3) { animation-delay: 0.4s; }
+.working-blocks span:nth-child(4) { animation-delay: 0.6s; }
+.working-blocks span:nth-child(5) { animation-delay: 0.8s; }
+.working-blocks span:nth-child(6) { animation-delay: 1s; }
+.working-blocks span:nth-child(7) { animation-delay: 1.2s; }
+.working-blocks span:nth-child(8) { animation-delay: 1.4s; }
+
+.working-title {
+	font-family: var(--font-display);
+	font-size: 13px;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+.working-caret {
+	display: inline-block;
+	width: 10px;
+	height: 13px;
+	margin-left: 6px;
+	vertical-align: baseline;
+	background: var(--fg);
+	animation: blink 0.8s steps(1) infinite;
+}
+
+@keyframes working {
+	0% {
+		background: var(--fg);
+	}
+	25% {
+		background: transparent;
+	}
+}
+
+/* A strategy that was just created, shown off: built block by block, then turning on the spot. */
+.fighter {
+	align-items: center;
+	text-align: center;
+}
+
+.fighter-stand {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+	padding-top: 16px;
+}
+
+.fighter-floor {
+	width: 256px;
+	max-width: 100%;
+	border-top: 8px dashed var(--fg);
+}
+
+.fighter-stand.is-ready .fighter-turn {
+	animation: fighter-turn 4.8s steps(1) infinite;
+}
+
+.fighter-name {
+	font-family: var(--font-display);
+	font-size: 18px;
+	line-height: 1.5;
+	text-transform: uppercase;
+	overflow-wrap: anywhere;
+}
+
+.fighter-actions {
+	justify-content: center;
+}
+
+/* A turn in pixel steps: the figure narrows to a sliver (side on) and widens again, twice for a full turn,
+   with a small hop when it faces front again; then it stands still for a moment. */
+@keyframes fighter-turn {
+	0% { transform: scaleX(1); }
+	3% { transform: scaleX(0.75); }
+	6% { transform: scaleX(0.45); }
+	9% { transform: scaleX(0.12); }
+	12% { transform: scaleX(0.45); }
+	15% { transform: scaleX(0.75); }
+	18% { transform: scaleX(1); }
+	21% { transform: scaleX(0.75); }
+	24% { transform: scaleX(0.45); }
+	27% { transform: scaleX(0.12); }
+	30% { transform: scaleX(0.45); }
+	33% { transform: scaleX(0.75); }
+	36% { transform: translateY(-8px); }
+	40% { transform: none; }
+	100% { transform: none; }
 }
 
 /* --- profile --- */
@@ -880,16 +1564,18 @@ input[aria-invalid='true'] {
 	text-align: center;
 }
 
-/* Magnetic screens: on the front page and on How it works, letting go of a scroll settles on the
+/* Magnetic screens: on every page (the front page and How it works have screens of their own make), letting go of a scroll settles on the
    nearest screen, never in between. The first screen sits under the header, so it settles by its
    bottom edge (the top of the page); every other one by its top edge. A screen taller than the
    window can still be scrolled through. */
-html:has(.landing) {
+html:has(.landing),
+html:has(.screens) {
 	scroll-snap-type: y proximity; /* narrow windows: screens can be taller than the window, so only a gentle pull */
 }
 
 @media (min-width: 901px) {
-	html:has(.landing) {
+	html:has(.landing),
+	html:has(.screens) {
 		scroll-snap-type: y mandatory;
 	}
 }
@@ -1955,6 +2641,10 @@ html:has(.landing) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+	.fixtures.is-wiping,
+	.working-blocks span,
+	.working-caret,
+	.fighter-turn,
 	.landing .avatar,
 	.talk-face,
 	.film-light,

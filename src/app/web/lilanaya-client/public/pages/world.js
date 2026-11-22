@@ -1,6 +1,8 @@
 import { getJson } from '../api.js';
 import { avatar, avatarName } from '../components/avatar.js';
 import { linkButton } from '../components/button.js';
+import { pager } from '../components/pager.js';
+import { screen, screenGroup, screens } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { fmt, fmtValue, h } from '../dom.js';
 
@@ -44,24 +46,27 @@ function leaderboard(board) {
 		return h('p', null, 'No runs yet. Run a simulation to fill the board.');
 	}
 	return [
-		h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Leaderboard' }, [
-			h('table', { class: 'grid-table' }, [
-				h('thead', null, h('tr', null, ['Rank', 'Actor', 'Average', 'Variance', 'Matches'].map((t) => h('th', { scope: 'col' }, t)))),
-				h(
-					'tbody',
-					null,
-					board.entries.map((e) =>
-						h('tr', null, [
-							h('td', { class: 'rank' }, String(e.rank)),
-							h('th', { scope: 'row' }, avatarName(e.actor_id, e.name)),
-							h('td', { class: 'num' }, fmt(e.average)),
-							h('td', { class: 'num' }, fmt(e.variance)),
-							h('td', { class: 'num' }, String(e.entries))
-						])
-					)
-				)
-			])
-		]),
+		// A long board is shown a windowful at a time.
+		pager({
+			rowHeight: 50,
+			reserve: 520,
+			rows: board.entries.map((e) =>
+				h('tr', null, [
+					h('td', { class: 'rank', 'data-label': 'Rank' }, String(e.rank)),
+					h('th', { scope: 'row' }, avatarName(e.actor_id, e.name)),
+					h('td', { class: 'num', 'data-label': 'Average' }, fmt(e.average)),
+					h('td', { class: 'num', 'data-label': 'Variance' }, fmt(e.variance)),
+					h('td', { class: 'num', 'data-label': 'Matches' }, String(e.entries))
+				])
+			),
+			wrap: (rows) =>
+				h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Leaderboard' }, [
+					h('table', { class: 'grid-table stacks' }, [
+						h('thead', null, h('tr', null, ['Rank', 'Actor', 'Average', 'Variance', 'Matches'].map((t) => h('th', { scope: 'col' }, t)))),
+						h('tbody', null, rows)
+					])
+				])
+		}),
 		h('p', { class: 'meta' }, [`Seed ${board.seed} · ${board.iterations} rounds per match · `, h('a', { href: `/runs/${board.run_id}` }, `See run ${board.run_id}`)])
 	];
 }
@@ -103,27 +108,35 @@ export async function worldPage({ params }) {
 	]);
 	return {
 		title: world.metadata.name,
-		node: h('div', { class: 'stack-lg' }, [
-			h('section', { class: 'stack' }, [
-				h('nav', { class: 'meta', 'aria-label': 'Breadcrumb' }, [h('a', { href: '/worlds' }, 'Worlds'), ` > ${world.metadata.name}`]),
-				sectionHeading(world.metadata.name, { level: 1 }),
-				h('p', { class: 'prose' }, world.metadata.description),
-				h('p', null, linkButton('Run simulation', `/runs/new?world=${world.id}`, { primary: true }))
-			]),
-			h('div', { class: 'columns' }, [
-				h('div', { class: 'stack-lg' }, [
-					h('section', { class: 'stack' }, [sectionHeading('Rules'), rules(world)]),
-					h('section', { class: 'stack' }, [sectionHeading('Payoff matrix'), payoffTable(world)])
-				]),
-				h('div', { class: 'stack-lg' }, [
-					h('section', { class: 'stack' }, [sectionHeading('High scores'), leaderboard(board)]),
-					h('section', { class: 'stack' }, [sectionHeading('Indicators'), indicators(world, history)]),
-					h('section', { class: 'stack' }, [
-						sectionHeading('Baseline actors'),
-						h('ul', { class: 'plain-list' }, strategies.map((s) => h('li', { class: 'avatar-heading' }, [avatar(s.id, { size: 32 }), h('div', null, [h('strong', null, s.name), h('br'), s.description])]))),
-						h('p', null, h('a', { href: '/strategies' }, 'How each strategy works'))
+		// One screen per thing to look at: what the world is and its rules, then who is winning, the indicators, and who plays in it.
+		node: screens([
+			screen(
+				[
+					h('div', { class: 'stack' }, [
+						h('nav', { class: 'meta', 'aria-label': 'Breadcrumb' }, [h('a', { href: '/worlds' }, 'Worlds'), ` > ${world.metadata.name}`]),
+						sectionHeading(world.metadata.name, { level: 1 }),
+						h('p', { class: 'prose' }, world.metadata.description),
+						h('p', null, linkButton('Run simulation', `/runs/new?world=${world.id}`, { primary: true }))
+					]),
+					h('div', { class: 'columns' }, [
+						h('div', { class: 'stack' }, [sectionHeading('Rules'), rules(world)]),
+						h('div', { class: 'stack' }, [sectionHeading('Payoff matrix'), payoffTable(world)])
 					])
-				])
+				],
+				{ class: 'stack-lg' }
+			),
+			// On a laptop one screen: who is winning beside the indicators, and who plays underneath.
+			screenGroup([
+				screen([sectionHeading('High scores'), leaderboard(board)], { class: 'stack' }),
+				screen([sectionHeading('Indicators'), indicators(world, history)], { class: 'stack' }),
+				screen(
+					[
+						sectionHeading('Baseline actors'),
+						h('ul', { class: 'actor-grid' }, strategies.filter((s) => s.builtin).map((s) => h('li', { class: 'avatar-heading' }, [avatar(s.id, { size: 32 }), h('div', null, [h('strong', null, s.name), h('br'), s.description])]))),
+						h('p', null, h('a', { href: '/strategies' }, 'How each strategy works'))
+					],
+					{ class: 'stack span' }
+				)
 			])
 		])
 	};

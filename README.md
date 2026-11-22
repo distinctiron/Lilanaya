@@ -84,6 +84,7 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 | `POST /api/runs` | Queues a run (202; signed in). Body: `world_id`, optional `actors`, `iterations`, `seed`, `policy`, `schedule_mode` |
 | `GET /api/runs`, `GET /api/runs/{id}` | Run list; one run with status and, once completed, its results. Private runs answer 404 to everyone but their owner |
 | `GET /api/runs/{id}/matches/{a}/{b}` | Round-by-round moves of one pairing |
+| `GET /api/runs/{id}/race` | For every match, both sides' points so far at up to 60 sampled rounds; the results page draws the race from it |
 | `GET /api/runs/{id}/artifacts`, `GET /api/runs/{id}/artifacts/{name}` | The run's files (manifest with sizes and SHA-256); the second redirects to a short-lived signed URL |
 | `GET /api/worlds/{id}/leaderboard` | Ranking from the latest completed run |
 | `GET /api/worlds/{id}/pairwise?run_id=` | Pairwise metrics: average payoff, outcome mix, first defection, punish duration |

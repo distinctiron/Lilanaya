@@ -1,6 +1,8 @@
 // Minimal client-side router on the History API. nginx serves index.html for
 // every path that is not a file, so deep links and reloads work.
 
+import { screen, screens } from './components/screen.js';
+
 /** Turns '/runs/:id' into a matcher returning the params, or null. */
 function compile(pattern) {
 	const names = [];
@@ -78,7 +80,8 @@ export function startRouter(routes, { main, onNavigate, notFound, errorPage }) {
 		}
 		leave = pending;
 		document.title = view.title ? `${view.title} · Lilanaya` : 'Lilanaya';
-		main.replaceChildren(view.node);
+		// Every page is made of screens; one that is not gets a single screen to itself.
+		main.replaceChildren(view.node.matches?.('.screens, .landing') ? view.node : screens([screen([view.node], { class: '' })]));
 		shown = here();
 		if (toSection()) return;
 		if (!initial) {

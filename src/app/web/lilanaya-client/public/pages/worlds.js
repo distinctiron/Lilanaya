@@ -19,16 +19,25 @@ export async function worldsPage() {
 					// Folded: name and key numbers. Folded out: the short description, the longer guide and the points.
 					fold({
 						open: worlds.length === 1, // nothing to compare with, so show it
+						group: 'world',
 						summary: [
 							h('h2', { class: 'section-heading' }, w.metadata.name),
 							h('span', { class: 'meta fold-tags' }, `${w.decisions.allowed.length} decisions · ${w.time.iterations} rounds per match`)
 						],
 						body: [
-							h('p', { class: 'prose' }, w.metadata.description),
-							(w.metadata.guide ?? '').split(/\n\s*\n/).filter(Boolean).map((text) => h('p', { class: 'prose' }, text)),
-							h('div', { class: 'stack-sm' }, [h('h3', { class: 'section-heading' }, 'The points'), payoffTable(w)]),
-							h('p', { class: 'meta' }, `Seed ${w.determinism.rng_seed}`),
-							h('p', { class: 'row' }, [linkButton('Run simulation', `/runs/new?world=${w.id}`, { primary: true }), linkButton('View world', `/worlds/${w.id}`)])
+							// Side by side where there is room: what the world is, and its points with the way in.
+							h('div', { class: 'columns' }, [
+								h('div', { class: 'stack' }, [
+									h('p', { class: 'prose' }, w.metadata.description),
+									// The longer read is a press away, so the world and its points share one screen.
+									w.metadata.guide ? h('details', null, [h('summary', null, 'The story behind it'), h('div', { class: 'stack' }, w.metadata.guide.split(/\n\s*\n/).filter(Boolean).map((text) => h('p', { class: 'prose' }, text)))]) : null
+								]),
+								h('div', { class: 'stack' }, [
+									h('div', { class: 'stack-sm' }, [h('h3', { class: 'section-heading' }, 'The points'), payoffTable(w)]),
+									h('p', { class: 'meta' }, `Seed ${w.determinism.rng_seed}`),
+									h('p', { class: 'row' }, [linkButton('Run simulation', `/runs/new?world=${w.id}`, { primary: true }), linkButton('View world', `/worlds/${w.id}`)])
+								])
+							])
 						]
 					})
 				)

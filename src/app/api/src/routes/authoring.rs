@@ -248,7 +248,8 @@ struct CompileBody {
 }
 
 /// Turns a plain-English description into rules with the language model.
-/// The rules come back for the editor (not saved), with the model's reasoning
+/// The rules come back for the editor (not saved), with the model's reasoning,
+/// the flags raised about the description (`flags`: rule violations and assumptions)
 /// and any problems the validator still finds.
 pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> ApiResult {
     let req: CompileBody = parse_json(body)?;
@@ -277,10 +278,12 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
                     "initial_state": s.initial_state, "action_map": s.action_map, "transitions": s.transitions,
                 },
                 "rationale": compiled.rationale,
+                "flags": compiled.flags,
                 "valid": compiled.errors.is_empty(),
                 "errors": compiled.errors,
             })))
         }
+        Err(CompileError::BreaksRules(message)) => Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "rule_violation", message)),
         Err(CompileError::NotAStrategy(message)) | Err(CompileError::Llm(LlmError::NoAnswer(message))) => {
             Err(ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "not_compiled", message))
         }
