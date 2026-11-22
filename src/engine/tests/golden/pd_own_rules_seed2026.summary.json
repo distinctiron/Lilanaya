@@ -1,0 +1,553 @@
+{
+  "world_id": "prisoners-dilemma",
+  "seed": 2026,
+  "iterations": 60,
+  "policy": "all_pairs",
+  "decisions": [
+    "C",
+    "D"
+  ],
+  "actors": [
+    {
+      "id": "always_cooperate",
+      "name": "Always Cooperate",
+      "strategy_id": "always_cooperate",
+      "matches": 4,
+      "rounds": 240,
+      "total": 531,
+      "average": 2.2125,
+      "variance": 1.6354687499999998
+    },
+    {
+      "id": "always_defect",
+      "name": "Always Defect",
+      "strategy_id": "always_defect",
+      "matches": 4,
+      "rounds": 240,
+      "total": 612,
+      "average": 2.55,
+      "variance": 2.6030555555555557
+    },
+    {
+      "id": "patient-grudger",
+      "name": "Patient Grudger",
+      "strategy_id": "patient-grudger",
+      "matches": 4,
+      "rounds": 240,
+      "total": 604,
+      "average": 2.5166666666666666,
+      "variance": 0.8030555555555555
+    },
+    {
+      "id": "tit_for_tat",
+      "name": "Tit for Tat",
+      "strategy_id": "tit_for_tat",
+      "matches": 4,
+      "rounds": 240,
+      "total": 592,
+      "average": 2.466666666666667,
+      "variance": 0.7356944444444445
+    },
+    {
+      "id": "win_stay_lose_shift",
+      "name": "Win-Stay Lose-Shift",
+      "strategy_id": "win_stay_lose_shift",
+      "matches": 4,
+      "rounds": 240,
+      "total": 562,
+      "average": 2.341666666666667,
+      "variance": 1.1335416666666667
+    }
+  ],
+  "ranking": [
+    "always_defect",
+    "patient-grudger",
+    "tit_for_tat",
+    "win_stay_lose_shift",
+    "always_cooperate"
+  ],
+  "matches": [
+    {
+      "a": "always_cooperate",
+      "b": "always_defect",
+      "seed": "6251e8f9e2132197",
+      "totals": [
+        0,
+        300
+      ],
+      "averages": [
+        0.0,
+        5.0
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 60,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 1,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          null
+        ],
+        "D": [
+          null,
+          0
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "patient-grudger",
+      "seed": "23e9996126744f93",
+      "totals": [
+        171,
+        186
+      ],
+      "averages": [
+        2.85,
+        3.1
+      ],
+      "outcome_counts": {
+        "C/C": 57,
+        "C/D": 3,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 1,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          57
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "tit_for_tat",
+      "seed": "f2d72446a29c7551",
+      "totals": [
+        180,
+        180
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 60,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "win_stay_lose_shift",
+      "seed": "2cc7376b9c081b99",
+      "totals": [
+        180,
+        180
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 60,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "a": "always_defect",
+      "b": "patient-grudger",
+      "seed": "270f661dd5d96057",
+      "totals": [
+        68,
+        58
+      ],
+      "averages": [
+        1.1333333333333333,
+        0.9666666666666667
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 2,
+        "D/D": 58
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 1
+      },
+      "first_played": {
+        "C": [
+          null,
+          0
+        ],
+        "D": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "a": "always_defect",
+      "b": "tit_for_tat",
+      "seed": "50b0a86963ae806e",
+      "totals": [
+        64,
+        59
+      ],
+      "averages": [
+        1.0666666666666667,
+        0.9833333333333333
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 59
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 1
+      },
+      "first_played": {
+        "C": [
+          null,
+          0
+        ],
+        "D": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "a": "always_defect",
+      "b": "win_stay_lose_shift",
+      "seed": "087433e702e21c08",
+      "totals": [
+        180,
+        30
+      ],
+      "averages": [
+        3.0,
+        0.5
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 30,
+        "D/D": 30
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 30,
+        "D/D": 30
+      },
+      "first_played": {
+        "C": [
+          null,
+          0
+        ],
+        "D": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "a": "patient-grudger",
+      "b": "tit_for_tat",
+      "seed": "0e24154bfa644c16",
+      "totals": [
+        178,
+        173
+      ],
+      "averages": [
+        2.966666666666667,
+        2.8833333333333333
+      ],
+      "outcome_counts": {
+        "C/C": 57,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 2
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 1
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          57,
+          58
+        ]
+      }
+    },
+    {
+      "a": "patient-grudger",
+      "b": "win_stay_lose_shift",
+      "seed": "1d962e626a25597b",
+      "totals": [
+        182,
+        172
+      ],
+      "averages": [
+        3.033333333333333,
+        2.8666666666666667
+      ],
+      "outcome_counts": {
+        "C/C": 57,
+        "C/D": 0,
+        "D/C": 2,
+        "D/D": 1
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 2,
+        "D/D": 1
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          57,
+          58
+        ]
+      }
+    },
+    {
+      "a": "tit_for_tat",
+      "b": "win_stay_lose_shift",
+      "seed": "36bb7a9215875133",
+      "totals": [
+        180,
+        180
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 60,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    }
+  ],
+  "pairwise": [
+    [
+      null,
+      0.0,
+      2.85,
+      3.0,
+      3.0
+    ],
+    [
+      5.0,
+      null,
+      1.1333333333333333,
+      1.0666666666666667,
+      3.0
+    ],
+    [
+      3.1,
+      0.9666666666666667,
+      null,
+      2.966666666666667,
+      3.033333333333333
+    ],
+    [
+      3.0,
+      0.9833333333333333,
+      2.8833333333333333,
+      null,
+      3.0
+    ],
+    [
+      3.0,
+      0.5,
+      2.8666666666666667,
+      3.0,
+      null
+    ]
+  ],
+  "outcome_distribution": {
+    "C/C": 351,
+    "C/D": 63,
+    "D/C": 36,
+    "D/D": 150
+  },
+  "kpis": [
+    {
+      "id": "mutual_cooperation_rate",
+      "label": "Mutual cooperation (% of rounds)",
+      "value": 58.5
+    },
+    {
+      "id": "percent_defectors",
+      "label": "Actors defecting more than half the time (%)",
+      "value": 20.0
+    },
+    {
+      "id": "exploitation_count",
+      "label": "Exploitation: one cooperates, one defects (rounds, last 100)",
+      "value": 99.0,
+      "breakdown": [
+        {
+          "actors": [
+            "always_cooperate",
+            "always_defect"
+          ],
+          "value": 60.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "patient-grudger"
+          ],
+          "value": 3.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "tit_for_tat"
+          ],
+          "value": 0.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "win_stay_lose_shift"
+          ],
+          "value": 0.0
+        },
+        {
+          "actors": [
+            "always_defect",
+            "patient-grudger"
+          ],
+          "value": 2.0
+        },
+        {
+          "actors": [
+            "always_defect",
+            "tit_for_tat"
+          ],
+          "value": 1.0
+        },
+        {
+          "actors": [
+            "always_defect",
+            "win_stay_lose_shift"
+          ],
+          "value": 30.0
+        },
+        {
+          "actors": [
+            "patient-grudger",
+            "tit_for_tat"
+          ],
+          "value": 1.0
+        },
+        {
+          "actors": [
+            "patient-grudger",
+            "win_stay_lose_shift"
+          ],
+          "value": 2.0
+        },
+        {
+          "actors": [
+            "tit_for_tat",
+            "win_stay_lose_shift"
+          ],
+          "value": 0.0
+        }
+      ]
+    }
+  ]
+}

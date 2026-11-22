@@ -114,3 +114,134 @@ pub fn pair_metrics(r: &RunResult) -> Vec<Value> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lilanaya_engine::{baseline_strategies, prisoners_dilemma, run, Actor, World};
+
+    fn played(world: &World, seed: u64) -> RunOutput {
+        let actors: Vec<Actor> = baseline_strategies().into_iter().map(|s| Actor { id: s.id.clone(), name: s.name.clone(), strategy: s }).collect();
+        run(world, &actors, seed).unwrap()
+    }
+
+    fn short_world() -> World {
+        let mut world = prisoners_dilemma();
+        world.time.iterations = 30;
+        world
+    }
+
+    fn sha256(bytes: &[u8]) -> String {
+        Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn a_run_has_a_summary_a_matrix_a_trace_per_pairing_and_a_manifest_last() {
+        let out = played(&short_world(), 42);
+        let files = files(7, &out);
+        let names: Vec<&str> = files.iter().map(|(meta, _)| meta.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "run_summary.json",
+                "pairwise_matrix.json",
+                "traces/always_cooperate__always_defect.json",
+                "traces/always_cooperate__tit_for_tat.json",
+                "traces/always_cooperate__win_stay_lose_shift.json",
+                "traces/always_defect__tit_for_tat.json",
+                "traces/always_defect__win_stay_lose_shift.json",
+                "traces/tit_for_tat__win_stay_lose_shift.json",
+                "manifest.json",
+            ]
+        );
+        for (meta, bytes) in &files {
+            assert_eq!(meta.content_type, "application/json", "{}", meta.name);
+            assert!(bytes.ends_with(b"\n"), "{} ends with a new line", meta.name);
+            serde_json::from_slice::<Value>(bytes).unwrap_or_else(|e| panic!("{} is not JSON: {e}", meta.name));
+        }
+    }
+
+    #[test]
+    fn the_manifest_says_of_every_other_file_how_large_it_is_and_what_its_checksum_is() {
+        let out = played(&short_world(), 42);
+        let files = files(7, &out);
+        let (manifest_meta, manifest_bytes) = files.last().unwrap();
+        // What is said about each file is true of its bytes, the manifest included.
+        for (meta, bytes) in &files {
+            assert_eq!((meta.size_bytes, meta.sha256.as_str()), (bytes.len() as i64, sha256(bytes).as_str()), "{}", meta.name);
+        }
+        let manifest: Value = serde_json::from_slice(manifest_bytes).unwrap();
+        assert_eq!((manifest["run_id"].as_i64(), manifest["world_id"].as_str(), manifest["seed"].as_u64(), manifest["iterations"].as_u64()), (Some(7), Some("prisoners-dilemma"), Some(42), Some(30)));
+        assert_eq!(manifest["policy"], "all_pairs");
+        let listed = manifest["artifacts"].as_array().unwrap();
+        assert_eq!(listed.len(), files.len() - 1, "every file but the manifest itself");
+        for (entry, (meta, _)) in listed.iter().zip(&files) {
+            assert_eq!(entry, &json!({ "name": meta.name, "content_type": meta.content_type, "size_bytes": meta.size_bytes, "sha256": meta.sha256 }));
+        }
+        assert_eq!(manifest_meta.name, "manifest.json");
+    }
+
+    #[test]
+    fn the_same_run_always_gives_the_same_bytes_and_another_run_does_not() {
+        let out = played(&short_world(), 42);
+        let bytes = |run_id: i64, out: &RunOutput| files(run_id, out).into_iter().map(|(_, bytes)| bytes).collect::<Vec<_>>();
+        assert!(bytes(7, &out) == bytes(7, &out));
+        assert!(bytes(7, &out) == bytes(7, &played(&short_world(), 42)), "played again from the same inputs");
+        assert!(bytes(7, &out) != bytes(8, &out), "the files carry the run's number");
+        assert!(bytes(7, &out) != bytes(7, &played(&short_world(), 43)), "and its seed");
+    }
+
+    #[test]
+    fn a_trace_is_the_rounds_of_one_pairing_and_the_files_agree_with_the_summary() {
+        let out = played(&short_world(), 42);
+        let files = files(7, &out);
+        let read = |name: &str| -> Value { serde_json::from_slice(&files.iter().find(|(meta, _)| meta.name == name).unwrap().1).unwrap() };
+
+        let trace = read("traces/always_defect__tit_for_tat.json");
+        assert_eq!((trace["run_id"].as_i64(), trace["a"].as_str(), trace["b"].as_str()), (Some(7), Some("always_defect"), Some("tit_for_tat")));
+        assert_eq!(trace["decisions"], json!(["C", "D"]));
+        let moves = trace["moves"].as_array().unwrap();
+        assert_eq!(moves.len(), 30);
+        // Always Defect defects; Tit for Tat cooperates once and then copies.
+        assert_eq!((&moves[0], &moves[1], &moves[29]), (&json!([1, 0]), &json!([1, 1]), &json!([1, 1])));
+
+        let summary = read("run_summary.json");
+        assert_eq!(summary["run_id"], 7);
+        assert_eq!(summary["summary"], json!(out.result), "the summary is the engine's result, unchanged");
+
+        let matrix = read("pairwise_matrix.json");
+        assert_eq!(matrix["average_payoff"], json!(out.result.pairwise));
+        assert_eq!(matrix["actors"].as_array().unwrap().len(), 4);
+        assert_eq!(matrix["pairs"], json!(pair_metrics(&out.result)));
+    }
+
+    #[test]
+    fn pair_metrics_say_when_the_first_defection_came_and_how_long_punishment_lasts() {
+        let out = played(&short_world(), 42);
+        let pairs = pair_metrics(&out.result);
+        let pair = |a: &str, b: &str| pairs.iter().find(|p| p["a"] == a && p["b"] == b).unwrap_or_else(|| panic!("{a} v {b}"));
+
+        // Nobody defects: no first defection, no punishment.
+        let friends = pair("always_cooperate", "tit_for_tat");
+        assert_eq!((&friends["first_defection_round"], &friends["punish_duration_average"]), (&Value::Null, &Value::Null));
+        assert_eq!(friends["average_payoff"], json!([3.0, 3.0]));
+        assert_eq!(friends["outcome_counts"], json!({ "C/C": 30, "C/D": 0, "D/C": 0, "D/D": 0 }));
+
+        // Defection from the first round; from the second, one unbroken stretch of mutual defection.
+        let feud = pair("always_defect", "tit_for_tat");
+        assert_eq!(feud["first_defection_round"], 0);
+        assert_eq!(feud["punish_duration_average"], 29.0);
+
+        // Against Win-Stay Lose-Shift, mutual defection comes every other round, one round at a time.
+        let flip = pair("always_defect", "win_stay_lose_shift");
+        assert_eq!(flip["outcome_counts"]["D/D"], 15);
+        assert_eq!(flip["punish_duration_average"], 1.0);
+
+        // A world without a decision called D has no "defection" to speak of.
+        let mut other = out.result.clone();
+        other.decisions = vec!["STAY".into(), "GO".into()];
+        for p in pair_metrics(&other) {
+            assert_eq!((&p["first_defection_round"], &p["punish_duration_average"]), (&Value::Null, &Value::Null));
+        }
+    }
+}

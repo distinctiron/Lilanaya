@@ -1,0 +1,10 @@
+{
+	"name": "lilanaya-ui-tests",
+	"private": true,
+	"type": "module",
+	"description": "Playwright tests of the whole site. Run with ./test ui from the repository root; nothing here is shipped.",
+	"devDependencies": {
+		"@axe-core/playwright": "4.14.0",
+		"@playwright/test": "1.65.1"
+	}
+}

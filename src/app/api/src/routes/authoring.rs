@@ -175,6 +175,9 @@ async fn check(state: &crate::worker::AppState, body: StrategyBody, id: &str) ->
         issues.push(Issue::new("description", format!("must be at most {MAX_DESCRIPTION_CHARS} characters")));
     }
     let doc = body.into_doc(id, &mut issues);
+    if prompt.as_deref().is_some_and(|p| p.contains('\0')) || doc.as_ref().is_some_and(|doc| has_nul(&json!(doc))) {
+        issues.push(Issue::new("", "must not contain the NUL character, which cannot be stored"));
+    }
     if let (Some(doc), Some(world)) = (&doc, &world) {
         // The full check, sample matches included, so code that fails while playing is not saved.
         let report = run_preview(state, doc.clone(), world.clone()).await?;
@@ -183,6 +186,17 @@ async fn check(state: &crate::worker::AppState, body: StrategyBody, id: &str) ->
     match doc {
         Some(doc) if issues.is_empty() => Ok(Checked { doc, visibility, world_id, prompt }),
         _ => Err(ApiError::invalid("The strategy is not valid", issues)),
+    }
+}
+
+/// Whether any text in `value` (a name or a value, at any depth) holds the NUL character.
+/// Postgres cannot store it, so a document with one in it cannot be saved.
+fn has_nul(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.contains('\0'),
+        Value::Array(items) => items.iter().any(has_nul),
+        Value::Object(fields) => fields.iter().any(|(name, value)| name.contains('\0') || has_nul(value)),
+        _ => false,
     }
 }
 

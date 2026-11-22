@@ -9,3 +9,8 @@ src/app/web/lilanaya-client/public/audio/voice/
 
 # The security audit lists weaknesses that are still open: kept out of the (public) repository.
 spec/docs/security-audit.md
+
+# UI tests: what a run leaves behind
+tests/ui/node_modules/
+tests/ui/test-results/
+tests/ui/report/

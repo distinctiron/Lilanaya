@@ -1,0 +1,92 @@
+# Runs the automatic tests on every push to main and on every pull request.
+# The same commands run on a developer's machine: see ./test and tests/README.md.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Lint, unit, API and safety tests (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # Each API test makes its own schema in this database and drops it again.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: lilanaya
+          POSTGRES_PASSWORD: lilanaya
+          POSTGRES_DB: lilanaya
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lilanaya -d lilanaya"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://lilanaya:lilanaya@localhost:5432/lilanaya
+      # Use this job's own toolchain instead of the development container.
+      LILANAYA_CARGO: cargo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: ./test lint
+      - run: ./test unit-rust
+      - run: ./test api
+      - run: ./test safety-rust
+
+  web:
+    name: Unit tests (front end)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./test unit-web
+
+  ui:
+    name: UI tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      # Builds the production images, starts the whole site and runs Playwright against it.
+      - run: ./test ui
+      # What a failed test looked like: the report, with a trace and a screenshot for each failure.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-test-report
+          path: |
+            tests/ui/report
+            tests/ui/test-results
+          retention-days: 14
+
+  dependencies:
+    name: Known vulnerabilities in dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked
+      # Both advisories are in packages that sqlx names for databases this project does not use
+      # (SQLite and MySQL); neither is built into the program.
+      - run: cargo audit --ignore RUSTSEC-2026-0459 --ignore RUSTSEC-2023-0071

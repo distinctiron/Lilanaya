@@ -1,0 +1,102 @@
+# The whole site, as it runs in production, for the UI tests. Started and taken down by `./test ui`.
+#
+# What is real: the nginx image, the API image (the release build, the same one Render runs), the API and the
+# worker as two services, Postgres. What stands in: the mail server (Mailpit catches every email) and the AI
+# gateway (tests/ui/fake-ai answers for the language model and the screen, so tests cost nothing and always
+# get the same answers). The database is kept in memory and is empty at every start.
+#
+# To look at the site the tests see: `docker compose -f compose.test.yaml up web`, then http://localhost:3100
+# (caught emails at http://localhost:8125).
+name: lilanaya-test
+
+x-api: &api
+  build:
+    context: .
+    dockerfile: src/app/api/Dockerfile
+    target: runtime
+  environment: &api-environment
+    DATABASE_URL: postgres://lilanaya:lilanaya@db:5432/lilanaya
+    # The address the test browser uses; sign-in links point here.
+    PUBLIC_URL: http://web
+    SMTP_URL: smtp://mail:1025
+    AI_GATEWAY_API_KEY: test-key
+    AI_GATEWAY_URL: http://ai:8090
+    # Small enough that a test can reach the limit and see what the site says then.
+    FREE_MONTHLY_RUNS: "3"
+  depends_on:
+    db:
+      condition: service_healthy
+    mail:
+      condition: service_started
+    ai:
+      condition: service_started
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: lilanaya
+      POSTGRES_PASSWORD: lilanaya # tests only; nothing outside this compose project can reach it
+      POSTGRES_DB: lilanaya
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lilanaya -d lilanaya"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  mail:
+    image: axllent/mailpit:v1.34.0
+    ports:
+      - "127.0.0.1:8125:8025"
+
+  # Stands in for Vercel AI Gateway: the language model and Jev, the screen in front of it.
+  ai:
+    image: node:24-alpine
+    command: ["node", "/fake-ai/server.mjs"]
+    volumes:
+      - ./tests/ui/fake-ai:/fake-ai:ro
+
+  api:
+    <<: *api
+    environment:
+      <<: *api-environment
+      ROLE: api
+
+  worker:
+    <<: *api
+    environment:
+      <<: *api-environment
+      ROLE: worker
+
+  web:
+    build:
+      context: src/app/web/lilanaya-client
+    ports:
+      - "127.0.0.1:3100:80"
+    depends_on:
+      - api
+      - worker
+
+  # Playwright, with its browsers. `./test ui` runs this one; what follows `./test ui` goes to `playwright test`.
+  ui:
+    image: mcr.microsoft.com/playwright:v1.65.1-noble
+    profiles: ["ui"]
+    working_dir: /work
+    entrypoint: ["sh", "/work/run.sh"]
+    environment:
+      BASE_URL: http://web
+      MAIL_URL: http://mail:8025
+      AI_URL: http://ai:8090
+      CI: ${CI:-}
+    # Chromium needs more shared memory than a container gets by default.
+    ipc: host
+    volumes:
+      - ./tests/ui:/work
+      - ui-node-modules:/work/node_modules
+    depends_on:
+      - web
+
+volumes:
+  ui-node-modules:

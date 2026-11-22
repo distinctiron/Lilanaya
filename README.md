@@ -61,10 +61,11 @@ Settings that are secret or differ per deployment go in a `.env` file next to th
 - The production-like stack needs `PUBLIC_URL` and `SMTP_URL` for sign-in emails. Without `SMTP_URL` the links are only printed to the API log.
 - A user's plan (`free` or `subscriber`) is a column in `users`; there is no billing yet, so change it with SQL.
 
-Tests (engine and API; the API tests use the compose Postgres, one throwaway schema per test):
+Tests (lint, unit, API, safety and UI tests, all in Docker; `tests/README.md` says what is tested where):
 
 ```bash
-docker compose run --rm api cargo test
+./test          # everything
+./test api      # one kind: lint, unit, api, safety or ui
 ```
 
 ## API

@@ -15,7 +15,7 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 - Dev: `docker compose up --build` — web http://localhost:3000, API http://localhost:8080/api/health, caught emails (sign-in links) http://localhost:8025
 - Production-like: `docker compose -f compose.prod.yaml up --build` — http://localhost:3000 (needs `POSTGRES_PASSWORD`)
 - Production: Render, described by `render.yaml`. The API and the worker are the same image with `ROLE=api` and `ROLE=worker`; `APP_ENV=production` makes it refuse to start without https and a mail server.
-- Rust tests: `docker compose run --rm api cargo test` (starts Postgres; each API test uses its own schema)
+- Tests: `./test` runs everything (lint, unit, API, safety, UI) in Docker; `./test unit`, `./test api`, `./test safety`, `./test ui` run one kind. What is tested where, and how to add a test: `tests/README.md`.
 - Golden files: if the engine's output changes on purpose, regenerate with `docker compose run --rm -e UPDATE_GOLDEN=1 api cargo test -p lilanaya-engine --test golden` and review the diff
 
 ## Layout
@@ -26,9 +26,12 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
   - Sign-in through Google, Apple, Facebook, GitHub: `oauth.rs` (the providers; each is behind its own flag, `GOOGLE_SIGN_IN`, `APPLE_SIGN_IN`, `FACEBOOK_SIGN_IN`, `GITHUB_SIGN_IN`, off unless set to `on`, and one that is on must have its credentials in the environment, see `.env.example`), `routes/federated.rs` (browser redirects under `/api/auth/{provider}/…`; failures land on `/sign-in?error=<code>`). An outside account is tied to a user in `user_identities`; a new one joins the user with the same verified address.
   - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `isolate.rs` (runs previews and runs in a child process with a time limit), `llm.rs` (raw HTTP to Vercel AI Gateway, Chat Completions), `guard.rs` (Jev, the screen in front of every model call, through the gateway's Decisions API), `routes/authoring.rs`.
   - Limits: `config.rs` (the numbers, from the environment), `store.rs` (each limit is counted and written under an advisory lock, so requests arriving together cannot all pass).
+- `tests/`: `web/` (unit tests of front-end modules, Node's own test runner), `ui/` (Playwright; `compose.test.yaml` starts the whole site for it, with a stand-in AI gateway in `ui/fake-ai/`). Rust tests live with the code: `src/engine/tests/`, `mod tests` in each module, and `src/app/api/src/routes/tests/` (one file per area, `access.rs`, `contract.rs`, `safety/`). The front end itself still has no Node and no build step: Node is used only to run tests, in containers.
 - `src/app/web/lilanaya-client/public`: `pages/` (one module per screen; `landing.js` is the home page at `/`, where a visitor plays five rounds by hand before anything is explained; `how-it-works.js` holds the narrated films), `components/` (`avatar.js` draws a strategy's avatar from its id, `film.js` plays the narrated step-by-step films, `scene.js` is their pausable clock, `pocket-dilemma.js` the small Prisoner's Dilemma both pages play in the browser), `router.js`, `api.js`, `session.js` (who is signed in), `dom.js`, `style.css`.
 
 ## Conventions
+
+- Every feature and every fix comes with tests, at the lowest layer that can show it works (`tests/README.md`, "Adding tests"). A new API route needs a row in `src/app/api/src/routes/tests/access.rs` saying who may call it; anything a user must not be able to do needs a test under `routes/tests/safety/`. Work is done, and an item in the implementation plan is ticked, only when `./test` passes.
 
 - Look and feel: the "Arcade" direction (black and white, pixel display type, dashed dividers, solid versus hollow blocks). `spec/docs/design/visual-direction.md` is the source of truth; follow it for every screen.
 - All API routes are under `/api`; nginx proxies `/api` to the backend, so the front end uses relative URLs.

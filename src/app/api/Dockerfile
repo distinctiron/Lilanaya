@@ -6,6 +6,8 @@ WORKDIR /app
 # --- dev: source is bind-mounted, rebuilds on change ---
 FROM base AS dev
 RUN cargo install cargo-watch --locked
+# The lint that `./test lint` runs.
+RUN rustup component add clippy
 ENV CARGO_TARGET_DIR=/target
 EXPOSE 8080
 # Watch only the Rust crates: front-end edits must not restart the API (runs are held in memory).

@@ -94,3 +94,71 @@ impl FromRequestParts<Arc<AppState>> for User {
             .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "unauthenticated", "Log in to do this"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_token_is_256_random_bits_as_hex() {
+        let tokens: Vec<String> = (0..200).map(|_| new_token()).collect();
+        for token in &tokens {
+            assert!(token.len() == 64 && token.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{token}");
+        }
+        let mut unique = tokens.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), tokens.len(), "two tokens were the same");
+        // Not a counter or a clock: every digit takes many values across tokens.
+        for position in 0..64 {
+            let mut seen: Vec<u8> = tokens.iter().map(|t| t.as_bytes()[position]).collect();
+            seen.sort();
+            seen.dedup();
+            assert!(seen.len() >= 8, "digit {position} takes only {} values", seen.len());
+        }
+    }
+
+    #[test]
+    fn only_the_sha_256_of_a_token_is_kept() {
+        // The standard's own examples.
+        assert_eq!(hash_token(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(hash_token("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let token = new_token();
+        assert_eq!(hash_token(&token), hash_token(&token));
+        assert_ne!(hash_token(&token), token);
+        assert_ne!(hash_token(&token), hash_token(&token.to_uppercase()));
+    }
+
+    #[test]
+    fn the_session_cookie_is_set_for_thirty_days_and_cleared_with_the_same_attributes() {
+        assert_eq!(session_cookie(Some("abc"), false), "lilanaya_session=abc; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax");
+        assert_eq!(session_cookie(Some("abc"), true), "lilanaya_session=abc; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax; Secure");
+        assert_eq!(session_cookie(None, false), "lilanaya_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+        assert_eq!(session_cookie(None, true), "lilanaya_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure");
+        assert_eq!((SESSION_DAYS, SIGN_IN_LINK_MINUTES), (30, 15));
+    }
+
+    #[test]
+    fn a_cookie_is_found_by_its_exact_name_among_whatever_else_the_browser_sends() {
+        let headers = |values: &[&str]| {
+            let mut map = HeaderMap::new();
+            for value in values {
+                map.append(header::COOKIE, value.parse().unwrap());
+            }
+            map
+        };
+        let find = |values: &[&str]| cookie(&headers(values), SESSION_COOKIE);
+        assert_eq!(find(&["lilanaya_session=abc"]), Some("abc".into()));
+        assert_eq!(find(&["theme=dark; lilanaya_session=abc; other=1"]), Some("abc".into()));
+        assert_eq!(find(&["theme=dark;lilanaya_session=abc"]), Some("abc".into()), "no space after the semicolon");
+        assert_eq!(find(&["theme=dark", "lilanaya_session=abc"]), Some("abc".into()), "in a header of its own");
+        assert_eq!(find(&["lilanaya_session=a=b=c"]), Some("a=b=c".into()), "only the first = separates name from value");
+        // A cleared cookie, a look-alike name, or none at all.
+        assert_eq!(find(&["lilanaya_session="]), None);
+        assert_eq!(find(&["lilanaya_session_old=abc; xlilanaya_session=abc; LILANAYA_SESSION=abc"]), None);
+        assert_eq!(find(&["lilanaya_session"]), None);
+        assert_eq!(find(&[]), None);
+        // An empty one first does not hide a real one after it.
+        assert_eq!(find(&["lilanaya_session=; lilanaya_session=abc"]), Some("abc".into()));
+    }
+}

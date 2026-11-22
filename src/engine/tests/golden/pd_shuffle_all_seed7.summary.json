@@ -1,0 +1,364 @@
+{
+  "world_id": "prisoners-dilemma",
+  "seed": 7,
+  "iterations": 50,
+  "policy": "random",
+  "schedule_mode": "shuffle_all",
+  "decisions": [
+    "C",
+    "D"
+  ],
+  "actors": [
+    {
+      "id": "always_cooperate",
+      "name": "Always Cooperate",
+      "strategy_id": "always_cooperate",
+      "matches": 3,
+      "rounds": 150,
+      "total": 300,
+      "average": 2.0,
+      "variance": 2.0
+    },
+    {
+      "id": "always_defect",
+      "name": "Always Defect",
+      "strategy_id": "always_defect",
+      "matches": 3,
+      "rounds": 150,
+      "total": 454,
+      "average": 3.026666666666667,
+      "variance": 2.5614222222222223
+    },
+    {
+      "id": "tit_for_tat",
+      "name": "Tit for Tat",
+      "strategy_id": "tit_for_tat",
+      "matches": 3,
+      "rounds": 150,
+      "total": 349,
+      "average": 2.3266666666666667,
+      "variance": 0.9067555555555556
+    },
+    {
+      "id": "win_stay_lose_shift",
+      "name": "Win-Stay Lose-Shift",
+      "strategy_id": "win_stay_lose_shift",
+      "matches": 3,
+      "rounds": 150,
+      "total": 325,
+      "average": 2.1666666666666665,
+      "variance": 1.3888888888888886
+    }
+  ],
+  "ranking": [
+    "always_defect",
+    "tit_for_tat",
+    "win_stay_lose_shift",
+    "always_cooperate"
+  ],
+  "matches": [
+    {
+      "a": "tit_for_tat",
+      "b": "win_stay_lose_shift",
+      "seed": "53ab68b0a2de0e79",
+      "totals": [
+        150,
+        150
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 50,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "always_defect",
+      "seed": "32fd76103cba65cd",
+      "totals": [
+        0,
+        250
+      ],
+      "averages": [
+        0.0,
+        5.0
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 50,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 1,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          null
+        ],
+        "D": [
+          null,
+          0
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "tit_for_tat",
+      "seed": "88b929af0973ba12",
+      "totals": [
+        150,
+        150
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 50,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "a": "always_defect",
+      "b": "win_stay_lose_shift",
+      "seed": "ce81ec198e81ade7",
+      "totals": [
+        150,
+        25
+      ],
+      "averages": [
+        3.0,
+        0.5
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 25,
+        "D/D": 25
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 25,
+        "D/D": 25
+      },
+      "first_played": {
+        "C": [
+          null,
+          0
+        ],
+        "D": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "a": "always_cooperate",
+      "b": "win_stay_lose_shift",
+      "seed": "16eeeb34c3dc1c95",
+      "totals": [
+        150,
+        150
+      ],
+      "averages": [
+        3.0,
+        3.0
+      ],
+      "outcome_counts": {
+        "C/C": 50,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "outcome_runs": {
+        "C/C": 1,
+        "C/D": 0,
+        "D/C": 0,
+        "D/D": 0
+      },
+      "first_played": {
+        "C": [
+          0,
+          0
+        ],
+        "D": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "a": "always_defect",
+      "b": "tit_for_tat",
+      "seed": "3614fe4987790d23",
+      "totals": [
+        54,
+        49
+      ],
+      "averages": [
+        1.08,
+        0.98
+      ],
+      "outcome_counts": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 49
+      },
+      "outcome_runs": {
+        "C/C": 0,
+        "C/D": 0,
+        "D/C": 1,
+        "D/D": 1
+      },
+      "first_played": {
+        "C": [
+          null,
+          0
+        ],
+        "D": [
+          0,
+          1
+        ]
+      }
+    }
+  ],
+  "pairwise": [
+    [
+      null,
+      0.0,
+      3.0,
+      3.0
+    ],
+    [
+      5.0,
+      null,
+      1.08,
+      3.0
+    ],
+    [
+      3.0,
+      0.98,
+      null,
+      3.0
+    ],
+    [
+      3.0,
+      0.5,
+      3.0,
+      null
+    ]
+  ],
+  "outcome_distribution": {
+    "C/C": 150,
+    "C/D": 50,
+    "D/C": 26,
+    "D/D": 74
+  },
+  "kpis": [
+    {
+      "id": "mutual_cooperation_rate",
+      "label": "Mutual cooperation (% of rounds)",
+      "value": 50.0
+    },
+    {
+      "id": "percent_defectors",
+      "label": "Actors defecting more than half the time (%)",
+      "value": 25.0
+    },
+    {
+      "id": "exploitation_count",
+      "label": "Exploitation: one cooperates, one defects (rounds, last 100)",
+      "value": 76.0,
+      "breakdown": [
+        {
+          "actors": [
+            "tit_for_tat",
+            "win_stay_lose_shift"
+          ],
+          "value": 0.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "always_defect"
+          ],
+          "value": 50.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "tit_for_tat"
+          ],
+          "value": 0.0
+        },
+        {
+          "actors": [
+            "always_defect",
+            "win_stay_lose_shift"
+          ],
+          "value": 25.0
+        },
+        {
+          "actors": [
+            "always_cooperate",
+            "win_stay_lose_shift"
+          ],
+          "value": 0.0
+        },
+        {
+          "actors": [
+            "always_defect",
+            "tit_for_tat"
+          ],
+          "value": 1.0
+        }
+      ]
+    }
+  ]
+}

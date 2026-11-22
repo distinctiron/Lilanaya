@@ -239,6 +239,10 @@ impl Store {
     }
 
     pub async fn world(&self, id: &str) -> Result<Option<World>, sqlx::Error> {
+        // Postgres cannot hold the NUL character, so nothing is stored under a name with one in it.
+        if id.contains('\0') {
+            return Ok(None);
+        }
         let row = sqlx::query("SELECT doc FROM worlds WHERE id = $1").bind(id).fetch_optional(&self.pool).await?;
         row.map(|r| r.try_get::<Json<World>, _>("doc").map(|j| j.0)).transpose()
     }
@@ -251,6 +255,9 @@ impl Store {
 
     /// One strategy, whoever owns it; the caller decides who may see it.
     pub async fn strategy(&self, id: &str) -> Result<Option<StrategyRow>, sqlx::Error> {
+        if id.contains('\0') {
+            return Ok(None);
+        }
         let sql = format!("{STRATEGY_SELECT} WHERE s.id = $1");
         sqlx::query(&sql).bind(id).fetch_optional(&self.pool).await?.map(strategy_row).transpose()
     }
@@ -374,6 +381,14 @@ impl Store {
     pub async fn rename_user(&self, id: i64, display_name: &str) -> Result<User, sqlx::Error> {
         let sql = format!("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING {USER_COLUMNS}");
         sqlx::query(&sql).bind(id).bind(display_name).fetch_one(&self.pool).await.and_then(user_row)
+    }
+
+    /// Makes every row of `table` look `interval` older (for example `"2 hours"`), so a test
+    /// can stand on the far side of a time limit without waiting for it.
+    #[cfg(test)]
+    pub async fn backdate(&self, table: &str, interval: &str) {
+        let expires = if matches!(table, "sessions" | "sign_in_tokens") { format!(", expires_at = expires_at - interval '{interval}'") } else { String::new() };
+        sqlx::query(&format!("UPDATE {table} SET created_at = created_at - interval '{interval}'{expires}")).execute(&self.pool).await.unwrap_or_else(|e| panic!("backdate {table}: {e}"));
     }
 
     #[cfg(test)]

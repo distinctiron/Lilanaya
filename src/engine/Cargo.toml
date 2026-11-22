@@ -7,4 +7,5 @@ version.workspace = true
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-serde_json = "1"
+# float_roundtrip, as in the API: a run read back from JSON must have exactly the numbers the engine made.
+serde_json = { version = "1", features = ["float_roundtrip"] }

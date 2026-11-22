@@ -1,0 +1,99 @@
+#!/bin/sh
+# Runs the automatic tests. Everything runs in Docker; nothing is installed on this machine.
+#
+#   ./test            everything (what CI runs)
+#   ./test lint       clippy over the Rust code
+#   ./test unit       unit tests: the engine, the API's modules, the front end's modules
+#   ./test api        API tests: every route through the real router, on Postgres
+#   ./test safety     safety tests: sandbox, AI screen, limits, privacy, sessions, headers
+#   ./test ui         UI tests: Playwright against the whole site (see compose.test.yaml)
+#
+# Anything after the mode goes to the tool that mode runs, for example:
+#   ./test api kpi                 only the API tests with "kpi" in their name
+#   ./test ui --grep "sign up"     only the UI tests whose title matches
+#   ./test ui --update-snapshots   take the screenshots again after a change of design
+#
+# See tests/README.md.
+set -eu
+cd "$(dirname "$0")"
+
+# CI has its own Rust toolchain and Postgres and sets LILANAYA_CARGO=cargo.
+CARGO="${LILANAYA_CARGO:-docker compose run --rm api cargo}"
+NODE_IMAGE="node:24-alpine"
+UI="docker compose -f compose.test.yaml"
+
+say() { printf '\n== %s ==\n' "$*"; }
+
+lint() {
+	say "lint: clippy"
+	# Mistakes and suspicious code fail; matters of style are shown but do not.
+	$CARGO clippy --workspace --all-targets --locked -- -D clippy::correctness -D clippy::suspicious
+}
+
+unit_rust() {
+	say "unit: engine"
+	$CARGO test --locked -p lilanaya-engine "$@"
+	say "unit: API modules"
+	$CARGO test --locked -p lilanaya-api "$@" -- --skip routes::tests
+}
+
+unit_web() {
+	say "unit: front end"
+	docker run --rm -v "$PWD:/app:ro" -w /app "$NODE_IMAGE" sh -c 'node --test "$@" tests/web/*.test.mjs' node "$@"
+}
+
+api() {
+	say "api: routes"
+	$CARGO test --locked -p lilanaya-api "$@" routes::tests -- --skip routes::tests::safety
+}
+
+safety_rust() {
+	say "safety: sandbox, isolation, AI screen, limits, privacy, sessions"
+	# Every test in a module called `safety`, and the modules that are safety through and through.
+	$CARGO test --locked -p lilanaya-api "$@" -- safety sandbox:: isolate:: guard::
+}
+
+# Starts the whole site for the UI tests, runs Playwright in its own container, and takes the site down again.
+ui() {
+	say "ui: Playwright"
+	$UI build
+	status=0
+	$UI run --rm ui "$@" || status=$?
+	if [ "$status" -ne 0 ]; then
+		# What the API and the worker said; the web server only logs requests.
+		$UI logs --no-color --tail 40 api worker || true
+	fi
+	$UI down --volumes --remove-orphans >/dev/null 2>&1 || true
+	return "$status"
+}
+
+mode="${1:-all}"
+[ "$#" -gt 0 ] && shift
+case "$mode" in
+	lint) lint ;;
+	unit)
+		unit_rust "$@"
+		unit_web
+		;;
+	unit-rust) unit_rust "$@" ;;
+	unit-web) unit_web "$@" ;;
+	api) api "$@" ;;
+	safety)
+		safety_rust "$@"
+		ui --grep @safety
+		;;
+	safety-rust) safety_rust "$@" ;;
+	ui) ui "$@" ;;
+	all)
+		lint
+		unit_rust
+		unit_web
+		api
+		safety_rust
+		ui
+		;;
+	*)
+		sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+		exit 2
+		;;
+esac
