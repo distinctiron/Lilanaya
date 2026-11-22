@@ -1,4 +1,5 @@
 import { getJson } from '../api.js';
+import { avatar, avatarName } from '../components/avatar.js';
 import { linkButton } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { fmt, fmtValue, h } from '../dom.js';
@@ -23,7 +24,7 @@ function rules(world) {
 	return h('dl', { class: 'rules' }, rows.map(([term, value]) => [h('dt', { class: 'meta' }, term), h('dd', null, value)]));
 }
 
-function payoffTable(world) {
+export function payoffTable(world) {
 	const d = world.decisions.allowed;
 	return h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': 'Payoff matrix' }, [
 		h('table', { class: 'grid-table' }, [
@@ -52,7 +53,7 @@ function leaderboard(board) {
 					board.entries.map((e) =>
 						h('tr', null, [
 							h('td', { class: 'rank' }, String(e.rank)),
-							h('th', { scope: 'row' }, e.name),
+							h('th', { scope: 'row' }, avatarName(e.actor_id, e.name)),
 							h('td', { class: 'num' }, fmt(e.average)),
 							h('td', { class: 'num' }, fmt(e.variance)),
 							h('td', { class: 'num' }, String(e.entries))
@@ -119,7 +120,7 @@ export async function worldPage({ params }) {
 					h('section', { class: 'stack' }, [sectionHeading('Indicators'), indicators(world, history)]),
 					h('section', { class: 'stack' }, [
 						sectionHeading('Baseline actors'),
-						h('ul', { class: 'plain-list' }, strategies.map((s) => h('li', null, [h('strong', null, s.name), h('br'), s.description]))),
+						h('ul', { class: 'plain-list' }, strategies.map((s) => h('li', { class: 'avatar-heading' }, [avatar(s.id, { size: 32 }), h('div', null, [h('strong', null, s.name), h('br'), s.description])]))),
 						h('p', null, h('a', { href: '/strategies' }, 'How each strategy works'))
 					])
 				])

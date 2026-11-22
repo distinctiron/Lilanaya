@@ -34,6 +34,9 @@ pub struct Metadata {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    /// The longer explanation shown when the world is folded out: paragraphs separated by a blank line.
+    #[serde(default)]
+    pub guide: String,
     pub version: String,
     #[serde(default)]
     pub visibility: Visibility,
@@ -266,6 +269,11 @@ pub fn prisoners_dilemma() -> World {
             description: "Two actors each choose to cooperate (C) or defect (D), round after round. \
                           Mutual cooperation pays 3 each, mutual defection 1 each; defecting against \
                           a cooperator pays 5 and leaves the cooperator with 0."
+                .into(),
+            guide: "The story: two partners in crime are questioned in separate rooms. Each can keep quiet,                     which is cooperating with the other, or talk, which is defecting. Neither knows what the                     other will choose.\n\n\
+                    The catch: in a single round, defecting always pays you more, whatever the other does.                     Against a cooperator you get 5 instead of 3, and against a defector 1 instead of 0. But                     if both think that way, both get 1, when both could have had 3.\n\n\
+                    Repeating changes the game: here the same two meet round after round and remember what                     happened. A defection can be answered in the next round, so trust can be built, broken                     and repaired. How to do that is what a strategy decides.\n\n\
+                    How a run is scored: every strategy plays one match against every other strategy. The                     points from all its matches add up, and the highest total wins. Winning single matches                     is not the goal; the total is."
                 .into(),
             version: "1.0.0".into(),
             visibility: Visibility::Public,

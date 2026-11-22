@@ -1,4 +1,5 @@
 import { getJson } from '../api.js';
+import { avatarName } from '../components/avatar.js';
 import { linkButton } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { fmt, h } from '../dom.js';
@@ -20,7 +21,7 @@ export async function runsPage() {
 								h('td', { class: 'num' }, String(r.seed)),
 								h('td', { class: 'num' }, String(r.iterations)),
 								h('td', { class: 'num' }, String(r.actor_count)),
-								h('td', null, r.winner ? `${r.winner.name} (${fmt(r.winner.average)})` : '')
+								h('td', null, r.winner ? avatarName(r.winner.id, `${r.winner.name} (${fmt(r.winner.average)})`) : '')
 							])
 						)
 					)

@@ -1,8 +1,8 @@
 import { h } from '../dom.js';
 
 /**
- * One leaderboard row (a <tr>): rank, name, bar, score, and an optional text label
- * so that solid versus hollow is never the only cue.
+ * One leaderboard row (a <tr>): rank, name (text or a node), bar, score, and an optional text label
+ * so that the bar's colour is never the only cue.
  * `share` is the score as a fraction of the best score. Returns { row, grow(g) },
  * where grow(0..1) scales the bar for the build-in animation.
  */

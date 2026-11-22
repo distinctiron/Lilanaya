@@ -22,8 +22,8 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 - `src/engine` (`lilanaya-engine`): pure simulation engine, no I/O. World model, FSM strategies, schedules, KPIs.
 - `src/app/api` (`lilanaya-api`): axum routes, Postgres store (sqlx, runtime queries, migrations in `migrations/`), background run worker (the `runs` table is the job queue), run artifacts in S3-compatible storage (`artifacts.rs`, `object_store` crate; configured by `S3_*` in the compose files).
   - Accounts: `auth.rs` (session cookie, `User` / `Viewer` extractors), `mail.rs`, `routes/account.rs`.
-  - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `llm.rs` (Claude through the Claude API or Azure Foundry, raw HTTP), `routes/authoring.rs`.
-- `src/app/web/lilanaya-client/public`: `pages/` (one module per screen), `components/`, `router.js`, `api.js`, `session.js` (who is signed in), `dom.js`, `style.css`.
+  - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `llm.rs` (raw HTTP; Claude through the Claude API for development, an Azure OpenAI deployment through the Responses API for production), `routes/authoring.rs`.
+- `src/app/web/lilanaya-client/public`: `pages/` (one module per screen; `landing.js` is the home page at `/`, where a visitor plays five rounds by hand before anything is explained; `how-it-works.js` holds the narrated films), `components/` (`avatar.js` draws a strategy's avatar from its id, `film.js` plays the narrated step-by-step films, `scene.js` is their pausable clock, `pocket-dilemma.js` the small Prisoner's Dilemma both pages play in the browser), `router.js`, `api.js`, `session.js` (who is signed in), `dom.js`, `style.css`.
 
 ## Conventions
 

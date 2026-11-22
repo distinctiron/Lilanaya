@@ -2,6 +2,7 @@ import { ApiError, getJson, postJson, putJson } from '../api.js';
 import { button, linkButton } from '../components/button.js';
 import { describeGuard } from '../components/machine.js';
 import { roundStrip, stripLegend } from '../components/round-strip.js';
+import { avatar } from '../components/avatar.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
 import { getUser } from '../session.js';
@@ -18,6 +19,7 @@ function decide(input) {
 
 const CODE_INPUT_FIELDS = [
 	['roundIndex', 'Number of the round about to be played; 0 for the first'],
+	['rounds', 'How many rounds the match has; the last round is roundIndex === rounds - 1'],
 	['lastOwnAction', 'What you played last round, or null in the first round'],
 	['lastOpponentAction', 'What the opponent played last round, or null in the first round'],
 	['opponentStreak', 'How many rounds in a row the opponent has played lastOpponentAction'],
@@ -33,7 +35,8 @@ const CONDITION_TYPES = [
 	['last_own_action', 'I just played'],
 	['opponent_streak', 'the opponent has repeated'],
 	['outcome_streak', 'the same result has repeated'],
-	['round_index', 'the game has lasted at least']
+	['round_index', 'the game has lasted at least'],
+	['rounds_left', 'the rounds left are at most']
 ];
 
 /** Signed-in users pick how to write the strategy; the choice is fixed once saved. */
@@ -83,6 +86,8 @@ function toForm(guard, decisions) {
 			}
 			case 'round_index':
 				return { ...base, op: g.op, n: g.at_least };
+			case 'rounds_left':
+				return { ...base, op: g.op, n: g.at_most };
 			default:
 				return null;
 		}
@@ -106,6 +111,8 @@ function toGuard(form) {
 					? { op: c.op, outcome: `${c.own}/${c.opponent}`, at_least: n }
 					: c.op === 'round_index'
 						? { op: c.op, at_least: n }
+						: c.op === 'rounds_left'
+							? { op: c.op, at_most: n }
 						: { op: c.op, is: c.decision };
 		return c.negate ? { op: 'not', guard: base } : base;
 	});
@@ -198,9 +205,14 @@ export async function strategyEditorPage({ params, navigate }) {
 				saveButton.disabled = true;
 				try {
 					const body = { ...draft(), visibility: visibility.value, world_id: world.id };
-					if (existing) await putJson(`/api/strategies/${encodeURIComponent(existing.id)}`, body);
-					else await postJson('/api/strategies', body);
-					await navigate('/strategies');
+					if (existing) {
+						await putJson(`/api/strategies/${encodeURIComponent(existing.id)}`, body);
+						await navigate('/strategies');
+					} else {
+						// The list builds the new strategy's avatar when it is told which one is new.
+						const made = await postJson('/api/strategies', body);
+						await navigate(made?.id ? `/strategies?new=${encodeURIComponent(made.id)}` : '/strategies');
+					}
 				} catch (error) {
 					saveButton.disabled = false;
 					if (!(error instanceof ApiError)) console.error(error);
@@ -232,7 +244,10 @@ export async function strategyEditorPage({ params, navigate }) {
 	return {
 		title,
 		node: h('section', { class: 'stack-lg' }, [
-			h('div', { class: 'stack' }, [sectionHeading(title, { level: 1 }), h('p', { class: 'meta' }, `${mode === 'code' ? 'Code' : 'Rules'} · For ${world.metadata.name} · Decisions ${decisions.join(', ')}`)]),
+			h('div', { class: 'stack' }, [
+				h('div', { class: 'avatar-heading' }, [existing ? avatar(existing.id, { size: 40 }) : null, sectionHeading(title, { level: 1 })]),
+				h('p', { class: 'meta' }, `${mode === 'code' ? 'Code' : 'Rules'} · For ${world.metadata.name} · Decisions ${decisions.join(', ')}${existing ? '' : ' · Gets its avatar when saved'}`)
+			]),
 			form
 		])
 	};
@@ -329,6 +344,8 @@ function rulesFields(existing, { decisions, world, user, name, description, chec
 						]
 					: c.op === 'round_index'
 						? [countInput(c, 'How many rounds'), 'rounds']
+						: c.op === 'rounds_left'
+							? [countInput(c, 'How many rounds'), '(counting the coming round)']
 						: [decisionSelect(c.decision, (v) => (c.decision = v), 'Decision')];
 		return h('div', { class: 'sentence' }, [
 			h('select', { 'aria-label': 'True or not true', onchange: (e) => (c.negate = e.target.value === 'not') }, [

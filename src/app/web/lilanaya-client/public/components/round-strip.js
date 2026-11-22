@@ -2,7 +2,8 @@ import { h } from '../dom.js';
 
 /**
  * One column per round: top square for the left player, bottom for the right.
- * Solid = the world's first decision, hollow = any other, ghost outline = not yet played.
+ * Blue = the world's first decision, magenta = any other, ghost outline = not yet played
+ * (the classes are still called solid and hollow).
  * `movesA`/`movesB` are decision indices for the rounds on show. `label` is the
  * text alternative read by screen readers. Returns { node, show(n) }.
  */
@@ -32,7 +33,7 @@ export function roundStrip({ movesA, movesB, label }) {
 	return { node, show };
 }
 
-/** The always-visible key for solid and hollow squares. */
+/** The always-visible key for the two kinds of square. */
 export function stripLegend({ top, bottom, solid, hollow }) {
 	return h('div', { class: 'legend meta' }, [
 		h('div', null, `Top row ${top} · Bottom row ${bottom}`),

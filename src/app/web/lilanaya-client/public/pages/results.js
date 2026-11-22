@@ -1,4 +1,5 @@
 import { getJson } from '../api.js';
+import { avatar, avatarName } from '../components/avatar.js';
 import { barRow } from '../components/bar-row.js';
 import { button, linkButton } from '../components/button.js';
 import { matrixGrid } from '../components/matrix-grid.js';
@@ -60,7 +61,7 @@ function defectsFirst(run, actorId) {
 }
 
 /** The match view: two players across the centre line, the round strip and its legend. */
-function buildMatch({ trace, world, names, roundLabel }) {
+function buildMatch({ trace, world, names, roundLabel, faces }) {
 	const total = trace.iterations;
 	const shownCount = Math.min(MAX_SHOWN_ROUNDS, total);
 	const d = trace.decisions;
@@ -88,9 +89,9 @@ function buildMatch({ trace, world, names, roundLabel }) {
 	const node = [
 		h('h2', { class: 'visually-hidden' }, `Match: ${trace.a.name} versus ${trace.b.name}`),
 		h('div', { class: 'match' }, [
-			h('div', { class: 'match-side match-left' }, [h('div', { class: 'match-name' }, trace.a.name), scoreA]),
+			h('div', { class: 'match-side match-left' }, [avatar(faces[0], { size: 48 }), h('div', { class: 'match-name' }, trace.a.name), scoreA]),
 			h('div', { class: 'centre-line', 'aria-hidden': 'true' }),
-			h('div', { class: 'match-side match-right' }, [h('div', { class: 'match-name' }, trace.b.name), scoreB])
+			h('div', { class: 'match-side match-right' }, [avatar(faces[1], { size: 48 }), h('div', { class: 'match-name' }, trace.b.name), scoreB])
 		]),
 		strip.node,
 		stripLegend({ top: trace.a.name, bottom: trace.b.name, solid: names.solid, hollow: names.hollow }),
@@ -198,6 +199,7 @@ export async function resultsPage(ctx) {
 		getJson(`/api/runs/${run.id}/artifacts`)
 	]);
 	const names = decisionNames(run.decisions);
+	const face = (actor) => actor.strategy_id ?? actor.id; // avatars belong to strategies
 	const byId = new Map(run.actors.map((actor, index) => [actor.id, { ...actor, index }]));
 	const ranked = run.ranking.map((id) => byId.get(id));
 
@@ -207,7 +209,7 @@ export async function resultsPage(ctx) {
 		const first = names.isCD ? defectsFirst(run, actor.id) : null;
 		return barRow({
 			rank: i + 1,
-			name: actor.name,
+			name: avatarName(face(actor), actor.name),
 			score: fmt(actor.average),
 			share: best > 0 ? Math.max(0, actor.average) / best : 0,
 			solid: first !== true,
@@ -235,7 +237,7 @@ export async function resultsPage(ctx) {
 		]),
 		h('p', { class: 'meta' }, [
 			'Average payoff per round',
-			names.isCD ? ' · Solid bar never defects first · Hollow bar defects first' : ''
+			names.isCD ? ' · Blue bar never defects first · Magenta bar defects first' : ''
 		])
 	]);
 
@@ -272,7 +274,7 @@ export async function resultsPage(ctx) {
 
 	const pairHref = (a, b) => `/runs/${run.id}?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`;
 	const matrix = matrixGrid({
-		actors: ranked,
+		actors: ranked.map((actor) => ({ ...actor, face: face(actor) })),
 		values: ranked.map((row) => ranked.map((col) => run.pairwise[row.index][col.index])),
 		caption: 'Head to head: average payoff per round of the row actor against the column actor',
 		hrefFor: (row, col) => pairHref(row.id, col.id),
@@ -287,7 +289,7 @@ export async function resultsPage(ctx) {
 		const mine = ++request;
 		const trace = await getJson(`/api/runs/${run.id}/matches/${encodeURIComponent(a)}/${encodeURIComponent(b)}`);
 		if (mine !== request) return; // a newer pick, or the page was left
-		match = buildMatch({ trace, world, names, roundLabel });
+		match = buildMatch({ trace, world, names, roundLabel, faces: [face(byId.get(a)), face(byId.get(b))] });
 		matchSection.replaceChildren(...match.node.filter(Boolean));
 		matchSection.removeAttribute('aria-busy');
 		matrix.select(a, b);

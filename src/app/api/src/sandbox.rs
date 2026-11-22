@@ -100,6 +100,7 @@ impl Decider for JsStrategy {
             let build = || -> rquickjs::Result<Object> {
                 let input = Object::new(ctx.clone())?;
                 input.set("roundIndex", view.round)?;
+                input.set("rounds", view.rounds)?;
                 input.set("lastOwnAction", view.last.map(|(own, _)| name(own)))?;
                 input.set("lastOpponentAction", view.last.map(|(_, opponent)| name(opponent)))?;
                 input.set("opponentStreak", view.opponent_streak)?;
@@ -167,7 +168,7 @@ mod tests {
     }
 
     fn first_round<'a>(zero: &'a [u32]) -> View<'a> {
-        View { round: 0, last: None, opponent_streak: 0, outcome_streak: 0, own_counts: zero, opponent_counts: zero, own_score: 0, opponent_score: 0 }
+        View { round: 0, rounds: 10, last: None, opponent_streak: 0, outcome_streak: 0, own_counts: zero, opponent_counts: zero, own_score: 0, opponent_score: 0 }
     }
 
     fn load(source: &str) -> Result<JsStrategy, String> {
@@ -185,7 +186,7 @@ mod tests {
         .unwrap();
         let zero = [0, 0];
         assert_eq!(s.decide(&first_round(&zero)), Ok(0));
-        let view = View { round: 3, last: Some((0, 1)), opponent_streak: 1, outcome_streak: 1, own_counts: &[3, 0], opponent_counts: &[2, 1], own_score: 6, opponent_score: 11 };
+        let view = View { round: 3, rounds: 10, last: Some((0, 1)), opponent_streak: 1, outcome_streak: 1, own_counts: &[3, 0], opponent_counts: &[2, 1], own_score: 6, opponent_score: 11 };
         assert_eq!(s.decide(&view), Ok(1), "copies the opponent's last move");
         let view = View { opponent_counts: &[1, 2], last: Some((0, 0)), ..view };
         assert_eq!(s.decide(&view), Ok(1), "defects once the opponent has mostly defected");

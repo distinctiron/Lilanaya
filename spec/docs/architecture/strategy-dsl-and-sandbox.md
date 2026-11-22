@@ -36,6 +36,7 @@ GuardExpression (grammar)
   - consecutive_opponent_C >= n
   - since_last_opponent_D_coops >= n
   - round_index >= n
+  - rounds_left <= n                 # the last n rounds of the match, counting the one about to be played
   - streak("D/D") >= n               # optional pair-outcome streak helper
 - Operators:
   - and, or, not

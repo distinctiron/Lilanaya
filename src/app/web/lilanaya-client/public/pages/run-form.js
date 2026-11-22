@@ -1,4 +1,5 @@
 import { ApiError, getJson, postJson } from '../api.js';
+import { avatar } from '../components/avatar.js';
 import { button } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
@@ -62,7 +63,7 @@ export async function runFormPage({ query, navigate }) {
 	const boxes = strategies.map((s) => h('input', { type: 'checkbox', name: 'actors', value: s.id, id: `actor-${s.id}`, checked: s.builtin }));
 	const option = (s) => {
 		const note = [s.mine && s.visibility === 'private' ? 'Private: the run will be private too' : null, !s.mine && !s.builtin ? `By ${s.owner_name}` : null, s.description].filter(Boolean).join(' · ');
-		return h('label', { class: 'check', for: `actor-${s.id}` }, [boxes[strategies.indexOf(s)], h('span', null, [h('strong', null, s.name), note ? [h('br'), h('span', { class: 'muted' }, note)] : null])]);
+		return h('label', { class: 'check', for: `actor-${s.id}` }, [boxes[strategies.indexOf(s)], avatar(s.id, { size: 24 }), h('span', null, [h('strong', null, s.name), note ? [h('br'), h('span', { class: 'muted' }, note)] : null])]);
 	};
 	const group = (title, list) => (list.length ? [h('p', { class: 'meta' }, title), list.map(option)] : null);
 	const actorsField = h('fieldset', { class: 'stack-sm', 'aria-describedby': 'run-actors-hint' }, [

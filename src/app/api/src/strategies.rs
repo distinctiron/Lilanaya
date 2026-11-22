@@ -188,6 +188,8 @@ How the machine runs
 - Before each round, the transitions that leave the current state are tried in the order they are listed. The first one whose guard is true is taken; if none is true, the strategy stays where it is. It then plays the decision of the state it is in.
 - In the first round there is no previous round, so every guard about the previous round is false and the strategy plays the decision of the initial state.
 - There is no randomness, no memory other than the current state, and no arithmetic. Anything the strategy must remember has to be a state.
+- A match has a fixed number of rounds, but the player can change that number for each run. For anything about the end of the match ("the last 10 rounds", "the final round") use rounds_left, never round_index with a number worked out from the match length.
+- A rule that must hold whatever else is going on (for example "in the last 10 rounds always defect") needs its own state, with a transition into it from every other state listed before that state's other transitions.
 
 Guards (JSON objects; "own" is this strategy, "opponent" is the other player)
 - {"op": "last_opponent_action", "is": D}: the opponent's previous decision was D.
@@ -195,6 +197,7 @@ Guards (JSON objects; "own" is this strategy, "opponent" is the other player)
 - {"op": "opponent_streak", "decision": D, "at_least": N}: the opponent has played D in each of the last N rounds (N >= 1).
 - {"op": "outcome_streak", "outcome": "X/Y", "at_least": N}: each of the last N rounds ended with own decision X and opponent decision Y.
 - {"op": "round_index", "at_least": N}: at least N rounds have already been played.
+- {"op": "rounds_left", "at_most": N}: at most N rounds are left in the match, counting the round about to be played (N >= 1). With N = 10 it is true in exactly the last 10 rounds.
 - {"op": "and", "all": [guards]}, {"op": "or", "any": [guards]}, {"op": "not", "guard": guard}.
 
 Answer with exactly one JSON object and nothing else: no code fence, no text before or after.
@@ -207,7 +210,7 @@ Answer with exactly one JSON object and nothing else: no code fence, no text bef
   "transitions": [{"from": state, "to": state, "guard": guard}],
   "rationale": two to four sentences on how the machine carries out the description, naming any part of the description you could not express and what you did instead
 }
-Use only decisions the world allows. Prefer the smallest machine that does what was asked.
+Use only decisions the world allows. Prefer the smallest machine that does what was asked, but carry out every part of the description: never leave a part out to keep the machine small.
 If the text is not a description of a strategy for this game, answer {"error": one sentence saying what is missing} instead."#;
 
 #[derive(Deserialize)]
@@ -239,6 +242,7 @@ pub struct Compiled {
 fn world_brief(world: &World) -> String {
     let decisions = &world.decisions.allowed;
     let mut text = format!("World: {}\n{}\nAllowed decisions: {}\n", world.metadata.name, world.metadata.description, decisions.join(", "));
+    text.push_str(&format!("Rounds per match: {} unless the player picks another number for a run\n", world.time.iterations));
     text.push_str("Payoffs per round (own decision / opponent decision -> own points, opponent points):\n");
     for own in decisions {
         for opponent in decisions {

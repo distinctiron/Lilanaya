@@ -3,3 +3,6 @@
 .env
 .env.*
 !.env.example
+
+# Stand-in voice clips for local testing (macOS system voice; not for release)
+src/app/web/lilanaya-client/public/audio/voice/

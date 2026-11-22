@@ -3,6 +3,8 @@ import { button, linkButton } from './components/button.js';
 import { renderHeader } from './components/header.js';
 import { sectionHeading } from './components/section-heading.js';
 import { h } from './dom.js';
+import { howItWorksPage } from './pages/how-it-works.js';
+import { landingPage } from './pages/landing.js';
 import { profilePage } from './pages/profile.js';
 import { resultsPage } from './pages/results.js';
 import { runFormPage } from './pages/run-form.js';
@@ -50,7 +52,8 @@ getUser().catch((error) => console.error(error));
 
 startRouter(
 	[
-		['/', worldsPage],
+		['/', landingPage],
+		['/how-it-works', howItWorksPage],
 		['/worlds', worldsPage],
 		['/worlds/:id', worldPage],
 		['/strategies', strategiesPage],

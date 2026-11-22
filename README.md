@@ -33,7 +33,7 @@ Initial target world: Prisoner’s Dilemma (repeated). The system is world‑agn
 - Storage: Postgres (worlds, strategies, runs, traces, KPI snapshots; the `runs` table doubles as the job queue) and S3-compatible object storage for run artifacts (Versity S3 Gateway locally; any S3 service via the `S3_*` settings).
 - Accounts: sign-in by emailed one-time link, session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
 - Code strategies: JavaScript, run in an embedded QuickJS interpreter with a memory cap and a step budget, no clock, no randomness, no I/O.
-- Plain-English strategy compile: Claude, through the Claude API (development) or Claude in Microsoft Foundry on Azure (production).
+- Plain-English strategy compile: a language model, either Claude through the Claude API (development) or a model deployed in Azure OpenAI (production).
 - Everything runs in containers; no local Rust toolchain is required.
 
 ## Running locally
@@ -56,7 +56,7 @@ Both stacks include Postgres and an S3-compatible store on http://localhost:9000
 
 Settings that are secret or differ per deployment go in a `.env` file next to the compose files (git-ignored; start from `.env.example`):
 
-- Plain-English compile is off until a key is set: `ANTHROPIC_API_KEY` for the Claude API, or `ANTHROPIC_FOUNDRY_API_KEY` with `ANTHROPIC_FOUNDRY_RESOURCE` (or `ANTHROPIC_FOUNDRY_BASE_URL`) for Azure. `LLM_MODEL` picks the model (on Azure, the deployment name); `LLM_PROVIDER` chooses when both are set.
+- Plain-English compile is off until a key is set: `ANTHROPIC_API_KEY` for the Claude API, or `AZURE_OPENAI_API_KEY` with `AZURE_OPENAI_URL` (the full address of the responses endpoint) and `LLM_MODEL` (the deployment name) for Azure OpenAI. `LLM_PROVIDER` chooses when both keys are set.
 - The production-like stack needs `PUBLIC_URL` and `SMTP_URL` for sign-in emails. Without `SMTP_URL` the links are only printed to the API log.
 - A user's plan (`free` or `subscriber`) is a column in `users`; there is no billing yet, so change it with SQL.
 

@@ -1,6 +1,6 @@
 import { h } from '../dom.js';
 
-/** Display-font heading. Level 1 is the page title (focusable, so the router can move focus to it). */
+/** Display-font heading. Focusable from code, so the router can move focus to the page title or to a linked section. */
 export function sectionHeading(text, { level = 2 } = {}) {
-	return h(`h${level}`, { class: 'section-heading', tabindex: level === 1 ? '-1' : null }, text);
+	return h(`h${level}`, { class: 'section-heading', tabindex: '-1' }, text);
 }

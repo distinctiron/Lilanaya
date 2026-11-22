@@ -13,6 +13,8 @@ export function describeGuard(guard) {
 			return `the last ${guard.at_least} rounds all ended ${guard.outcome}`;
 		case 'round_index':
 			return `at least ${guard.at_least} rounds have been played`;
+		case 'rounds_left':
+			return guard.at_most === 1 ? 'it is the last round' : `at most ${guard.at_most} rounds are left`;
 		case 'and':
 			return guard.all.map((g) => `(${describeGuard(g)})`).join(' and ');
 		case 'or':

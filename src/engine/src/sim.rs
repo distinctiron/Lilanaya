@@ -26,6 +26,8 @@ pub struct Actor {
 pub struct View<'a> {
     /// Index of the round about to be played (0 for the first).
     pub round: u32,
+    /// How many rounds the pairing plays in all.
+    pub rounds: u32,
     /// `(own, opponent)` decisions of the previous round; `None` in the first.
     pub last: Option<(u8, u8)>,
     /// How many rounds in a row the opponent has played its last decision.
@@ -393,7 +395,7 @@ impl PairState {
     fn new(initial_a: usize, initial_b: usize, d: usize, rounds: u32) -> Self {
         PairState {
             state: [initial_a, initial_b],
-            obs: [Observation::default(); 2],
+            obs: [Observation::new(rounds); 2],
             score: [0; 2],
             played: [vec![0; d], vec![0; d]],
             counts: vec![0; d * d],
@@ -417,6 +419,7 @@ impl PairState {
                 let obs = &self.obs[side];
                 let view = View {
                     round: obs.round,
+                    rounds: obs.rounds,
                     last: obs.last,
                     opponent_streak: obs.opponent_streak,
                     outcome_streak: obs.outcome_streak,

@@ -25,6 +25,17 @@ export function startRouter(routes, { main, onNavigate, notFound, errorPage }) {
 	const table = routes.map(([pattern, page]) => [compile(pattern), page]);
 	let leave = [];
 	let token = 0;
+	let shown = null; // path and query of the page on show; a change of only the #section does not draw it again
+	const here = () => location.pathname + location.search;
+
+	/** Scrolls to the section the address names (`/#ranking`) and puts focus on its heading. False if there is none. */
+	function toSection() {
+		const target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+		if (!target || !main.contains(target)) return false;
+		target.scrollIntoView({ block: 'start' });
+		(target.querySelector('h1, h2, h3') ?? target).focus({ preventScroll: true });
+		return true;
+	}
 
 	async function render({ initial = false } = {}) {
 		const mine = ++token;
@@ -68,6 +79,8 @@ export function startRouter(routes, { main, onNavigate, notFound, errorPage }) {
 		leave = pending;
 		document.title = view.title ? `${view.title} · Lilanaya` : 'Lilanaya';
 		main.replaceChildren(view.node);
+		shown = here();
+		if (toSection()) return;
 		if (!initial) {
 			window.scrollTo(0, 0);
 			// Move keyboard and screen-reader focus to the new page.
@@ -80,14 +93,19 @@ export function startRouter(routes, { main, onNavigate, notFound, errorPage }) {
 		return render();
 	}
 
-	window.addEventListener('popstate', () => render());
+	window.addEventListener('popstate', () => (here() === shown ? toSection() || window.scrollTo(0, 0) : render()));
 	document.addEventListener('click', (e) => {
 		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 		const a = e.target.closest?.('a[href]');
 		if (!a || a.target || a.hasAttribute('download') || a.origin !== location.origin) return;
 		if (a.pathname.startsWith('/api/') || a.pathname.startsWith('/fonts/')) return;
 		e.preventDefault();
-		if (a.href === location.href) return;
+		if (a.href === location.href) return void toSection();
+		if (a.pathname + a.search === shown && a.hash) {
+			// Another section of the page on show: move there without drawing the page again.
+			history.pushState(null, '', a.href);
+			return void toSection();
+		}
 		navigate(a.href);
 	});
 

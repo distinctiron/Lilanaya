@@ -8,6 +8,7 @@ World Schema v1 (conceptual)
 - metadata:
   - name: string
   - description: string
+  - guide: string (optional; the longer explanation shown when the world is folded out on the Worlds page; paragraphs separated by a blank line)
   - version: semver
   - visibility: public | private
 - decisions:

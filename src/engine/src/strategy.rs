@@ -50,6 +50,8 @@ pub enum Guard {
     OutcomeStreak { outcome: String, at_least: u32 },
     /// At least `at_least` rounds have been played (the first round is index 0).
     RoundIndex { at_least: u32 },
+    /// At most `at_most` rounds are left in the match, counting the one about to be played.
+    RoundsLeft { at_most: u32 },
     And { all: Vec<Guard> },
     Or { any: Vec<Guard> },
     Not { guard: Box<Guard> },
@@ -215,6 +217,14 @@ fn compile_guard(guard: &Guard, decisions: &[String], path: &str, depth: usize, 
             Some(CGuard::OutcomeStreak(own, opponent, n?))
         }
         Guard::RoundIndex { at_least } => Some(CGuard::Round(*at_least)),
+        Guard::RoundsLeft { at_most } => {
+            if *at_most == 0 {
+                issues.push(Issue::new(format!("{path}.at_most"), "must be 1 or more"));
+                None
+            } else {
+                Some(CGuard::RoundsLeft(*at_most))
+            }
+        }
         Guard::And { all } => compile_list(all, decisions, &format!("{path}.all"), depth, issues).map(CGuard::And),
         Guard::Or { any } => compile_list(any, decisions, &format!("{path}.any"), depth, issues).map(CGuard::Or),
         Guard::Not { guard } => {
@@ -254,6 +264,7 @@ pub(crate) enum CGuard {
     OpponentStreak(u8, u32),
     OutcomeStreak(u8, u8, u32),
     Round(u32),
+    RoundsLeft(u32),
     And(Vec<CGuard>),
     Or(Vec<CGuard>),
     Not(Box<CGuard>),
@@ -264,6 +275,8 @@ pub(crate) enum CGuard {
 pub(crate) struct Observation {
     /// Index of the round about to be played (0 for the first).
     pub round: u32,
+    /// How many rounds the pairing plays in all.
+    pub rounds: u32,
     /// `(own, opponent)` decisions of the previous round.
     pub last: Option<(u8, u8)>,
     /// How many rounds in a row the opponent has played its last decision.
@@ -273,6 +286,11 @@ pub(crate) struct Observation {
 }
 
 impl Observation {
+    /// Before the first round of a pairing that plays `rounds` rounds.
+    pub fn new(rounds: u32) -> Self {
+        Observation { rounds, ..Observation::default() }
+    }
+
     /// Folds a finished round into the observation.
     pub fn record(&mut self, own: u8, opponent: u8) {
         match self.last {
@@ -301,6 +319,7 @@ impl CGuard {
             }
             CGuard::OutcomeStreak(own, opponent, n) => obs.last == Some((*own, *opponent)) && obs.outcome_streak >= *n,
             CGuard::Round(n) => obs.round >= *n,
+            CGuard::RoundsLeft(n) => obs.rounds.saturating_sub(obs.round) <= *n,
             CGuard::And(all) => all.iter().all(|g| g.holds(obs)),
             CGuard::Or(any) => any.iter().any(|g| g.holds(obs)),
             CGuard::Not(g) => !g.holds(obs),
@@ -384,7 +403,7 @@ mod tests {
         let decisions = cd();
         let compiled = strategy.compile(&decisions).unwrap();
         let mut state = compiled.initial;
-        let mut obs = Observation::default();
+        let mut obs = Observation::new(opponent.len() as u32);
         let mut out = String::new();
         for ch in opponent.chars() {
             let (next, own) = compiled.step(state, &obs);
@@ -425,6 +444,24 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(guard, Guard::And { ref all } if all.len() == 2));
+    }
+
+    #[test]
+    fn rounds_left_marks_the_end_of_the_match() {
+        // Tit for Tat, except that the last 3 rounds are always D.
+        let mut s = baseline("tit_for_tat");
+        let (first, other) = (s.states[0].clone(), s.states[1].clone());
+        s.states.push("END".into());
+        s.action_map.insert("END".into(), "D".into());
+        let end = |from: &String| Transition { from: from.clone(), to: "END".into(), guard: Guard::RoundsLeft { at_most: 3 } };
+        s.transitions.splice(0..0, [end(&first), end(&other)]);
+        assert_eq!(play(&s, "CCCCCCCC"), "CCCCCDDD");
+        assert_eq!(play(&s, "CC"), "DD", "a match shorter than the end game is all end game");
+
+        s.transitions[0].guard = Guard::RoundsLeft { at_most: 0 };
+        assert_eq!(s.validate(&cd())[0].path, "transitions[0].guard.at_most");
+        let json = serde_json::to_value(Guard::RoundsLeft { at_most: 3 }).unwrap();
+        assert_eq!(json, serde_json::json!({ "op": "rounds_left", "at_most": 3 }));
     }
 
     #[test]

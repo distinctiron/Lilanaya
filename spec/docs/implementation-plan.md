@@ -80,7 +80,7 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 
 - [x] Create, edit and delete own strategies; mode (rules or code) is chosen once and then fixed.
 - [x] Rules editor: states, the decision each plays, and conditions for moving between them.
-- [ ] Plain English to rules through an LLM (Claude API key for dev, Azure-hosted Claude endpoint in production); the result is checked by the engine's validator and can be corrected in the editor. Built and tested against a stand-in server for both providers; not ticked until it has run against the real Claude API (needs the user's key in `.env`).
+- [x] Plain English to rules through an LLM (Claude API key for dev, an Azure OpenAI deployment in production); the result is checked by the engine's validator and can be corrected in the editor. Verified against the real Claude API on 2026-11-19; the Azure OpenAI side has only run against a stand-in server (needs the key and deployment name).
 - [x] Static preview: problems, warnings (unreachable states, dead ends) and two sample matches (v Always Cooperate, v Always Defect); uses no quota.
 - [x] Own strategies can be entered in runs.
 
@@ -100,7 +100,7 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 
 - Artifacts go to S3-compatible object storage (user, 2026-11-18).
 - Accounts come before authoring (user, 2026-11-18).
-- Plain-English compile uses Claude: an API key in dev/test, an Azure-provisioned endpoint in production; both must work (user, 2026-11-18). Built on the assumption that the Azure endpoint is Claude in Microsoft Foundry (same Messages API) — confirm with the user.
+- Plain-English compile: a Claude API key in dev/test, an Azure-provisioned endpoint in production; both must work (user, 2026-11-18). The Azure endpoint is Azure OpenAI, Responses API (user, 2026-11-19), so production runs an OpenAI model and dev/test runs Claude; the compile prompt has to work on both.
 - Code strategies are written in JavaScript (user, 2026-11-18).
 
 ## Open decisions (ask, do not assume)

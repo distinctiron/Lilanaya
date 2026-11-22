@@ -58,13 +58,13 @@ services:
       PUBLIC_URL: http://localhost:3000
       SMTP_URL: smtp://mail:1025
       # Plain-English strategy compile. Leave both keys unset to switch it off.
-      # Dev/test: a Claude API key. Production: Claude in Microsoft Foundry (Azure).
+      # Dev/test: a Claude API key. Production: a model deployed in Azure OpenAI.
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      LLM_EFFORT: ${LLM_EFFORT:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_FOUNDRY_API_KEY: ${ANTHROPIC_FOUNDRY_API_KEY:-}
-      ANTHROPIC_FOUNDRY_RESOURCE: ${ANTHROPIC_FOUNDRY_RESOURCE:-}
-      ANTHROPIC_FOUNDRY_BASE_URL: ${ANTHROPIC_FOUNDRY_BASE_URL:-}
+      AZURE_OPENAI_URL: ${AZURE_OPENAI_URL:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
     ports:
       - "8080:8080"
     volumes:

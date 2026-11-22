@@ -1,4 +1,5 @@
 import { fmt, h } from '../dom.js';
+import { avatar } from './avatar.js';
 
 /** "Tit for Tat" → "TFT", "Win-Stay Lose-Shift" → "WSLS". */
 export function abbreviate(name) {
@@ -10,7 +11,7 @@ export function abbreviate(name) {
 }
 
 /**
- * Head-to-head table. `actors`: [{ id, name }]; `values[row][col]`: the row actor's
+ * Head-to-head table. `actors`: [{ id, name, face }] (`face` is the id its avatar is drawn from); `values[row][col]`: the row actor's
  * average against the column actor, or null where no match was played.
  * Cells shade from dark grey (lowest) to white (highest) and link to that match
  * via `hrefFor(rowActor, colActor)`; `onPick(rowActor, colActor, event)` runs on click.
@@ -22,13 +23,14 @@ export function matrixGrid({ actors, values, hrefFor, onPick, caption }) {
 	const max = Math.max(...played);
 	const links = [];
 
-	const head = h('tr', null, [
+	const head = (a) => h('span', { class: 'matrix-head' }, [avatar(a.face ?? a.id, { size: 24 }), h('abbr', { title: a.name }, abbreviate(a.name))]);
+	const headRow = h('tr', null, [
 		h('td', null),
-		actors.map((a) => h('th', { scope: 'col' }, h('abbr', { title: a.name }, abbreviate(a.name))))
+		actors.map((a) => h('th', { scope: 'col' }, head(a)))
 	]);
 	const rows = actors.map((rowActor, r) =>
 		h('tr', null, [
-			h('th', { scope: 'row' }, h('abbr', { title: rowActor.name }, abbreviate(rowActor.name))),
+			h('th', { scope: 'row' }, head(rowActor)),
 			actors.map((colActor, c) => {
 				const v = values[r][c];
 				if (v == null) return h('td', { class: 'cell cell-empty' }, h('span', { 'aria-label': 'not played' }, '·'));
@@ -51,7 +53,7 @@ export function matrixGrid({ actors, values, hrefFor, onPick, caption }) {
 	const node = h('div', { class: 'scroll-box', tabindex: '0', role: 'group', 'aria-label': caption }, [
 		h('table', { class: 'matrix', style: { '--n': String(actors.length) } }, [
 			h('caption', { class: 'visually-hidden' }, caption),
-			h('thead', null, head),
+			h('thead', null, headRow),
 			h('tbody', null, rows)
 		])
 	]);
