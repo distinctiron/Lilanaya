@@ -12,7 +12,7 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 
 ## Commands
 
-- Dev: `docker compose up --build` — web http://localhost:3000, API http://localhost:8080/api/health, caught emails (sign-in links) http://localhost:8025
+- Dev: `docker compose up --build` — web http://localhost:3000, API http://localhost:8080/api/health, caught emails (sign-up and new-password links) http://localhost:8025
 - Production-like: `docker compose -f compose.prod.yaml up --build` — http://localhost:3000 (needs `POSTGRES_PASSWORD`)
 - Production: Render, described by `render.yaml`. The API and the worker are the same image with `ROLE=api` and `ROLE=worker`; `APP_ENV=production` makes it refuse to start without https and a mail server.
 - Tests: `./test` runs everything (lint, unit, API, safety, UI) in Docker; `./test unit`, `./test api`, `./test safety`, `./test ui` run one kind. What is tested where, and how to add a test: `tests/README.md`.
@@ -22,7 +22,7 @@ Strategy-simulation platform: users define game-theory "worlds" (first: repeated
 
 - `src/engine` (`lilanaya-engine`): pure simulation engine, no I/O. World model, FSM strategies, schedules, KPIs.
 - `src/app/api` (`lilanaya-api`): axum routes, Postgres store (sqlx, runtime queries, migrations in `migrations/`), background run worker (the `runs` table is the job queue), a run's downloadable files built on request from the database (`artifacts.rs`; nothing is stored).
-  - Accounts: `auth.rs` (session cookie, `User` / `Viewer` extractors), `mail.rs`, `routes/account.rs`.
+  - Accounts: `auth.rs` (session cookie, password hashing with Argon2id, `User` / `Viewer` extractors), `mail.rs`, `routes/account.rs`. The emailed link is for signing up and for choosing a new password (`POST /api/auth/email/confirm` takes the token and the password, and ends the user's other sessions); logging in is address and password (`POST /api/auth/log-in`, ten wrong passwords per address in 15 minutes).
   - Sign-in through Google, Apple, Facebook, GitHub: `oauth.rs` (the providers; each is behind its own flag, `GOOGLE_SIGN_IN`, `APPLE_SIGN_IN`, `FACEBOOK_SIGN_IN`, `GITHUB_SIGN_IN`, off unless set to `on`, and one that is on must have its credentials in the environment, see `.env.example`), `routes/federated.rs` (browser redirects under `/api/auth/{provider}/…`; failures land on `/sign-in?error=<code>`). An outside account is tied to a user in `user_identities`; a new one joins the user with the same verified address.
   - Strategies: `strategies.rs` (rules or code documents, preview, plain-English compile), `sandbox.rs` (JavaScript in QuickJS), `isolate.rs` (runs previews and runs in a child process with a time limit), `llm.rs` (raw HTTP to Vercel AI Gateway, Chat Completions), `guard.rs` (Jev, the screen in front of every model call, through the gateway's Decisions API), `routes/authoring.rs`.
   - Payment: `billing.rs` (Stripe over raw HTTP: Checkout, customer portal, webhook signature, the pack catalog; off unless `STRIPE_SECRET_KEY` is set), `routes/billing.rs`. Amounts live in Stripe, not in code. A user is a subscriber while `subscriptions` holds a paid period that has not run out (`PAID_SUBSCRIPTION` in `store.rs`); the period moves only when Stripe says its invoice is paid. Packs (`purchases`) are spent after the plan's own allowance (`from_pack` on `llm_calls` and `runs`). Whatever a webhook says is read again from Stripe before it is believed.

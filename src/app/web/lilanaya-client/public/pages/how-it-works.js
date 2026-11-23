@@ -650,7 +650,7 @@ export async function howItWorksPage({ onLeave, query }) {
 				]),
 				h('div', { class: 'landing-close stack-md' }, [
 				h('h2', { class: 'section-heading' }, 'Think your strategy can win?'),
-				h('p', null, user ? 'Every strategy you make gets its own avatar.' : 'Sign up with your email. No password needed. Every strategy you make gets its own avatar.'),
+				h('p', null, user ? 'Every strategy you make gets its own avatar.' : 'Sign up with your email. Every strategy you make gets its own avatar.'),
 				h('p', { class: 'row' }, [linkButton('Write your first strategy', start, { primary: true }), linkButton('Back to the start', '/')])
 				])
 			]),

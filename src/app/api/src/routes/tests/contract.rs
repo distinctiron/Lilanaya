@@ -75,7 +75,7 @@ fn usage_shape() -> Value {
 
 fn me_shape() -> Value {
     json!({
-        "id": "number", "email": "string", "display_name": "string", "roles": ["string"], "plan": "string",
+        "id": "number", "email": "string", "display_name": "string", "roles": ["string"], "plan": "string", "has_password": "bool",
         "entitlements": { "analytics_access": "bool", "quick_test_access": "bool", "private_worlds": "bool" },
         "usage": usage_shape(),
         "features": { "compile": "bool", "billing": "bool" },
@@ -144,8 +144,10 @@ async fn the_account_pages_get_the_user_the_usage_and_the_plans() {
     // Signing in: the page shows how long the link is good for, and takes the user from the confirmation.
     let (_, sent) = anon.post("/api/auth/email", json!({ "email": "grace@example.com" })).await;
     has_shape("POST /api/auth/email", &sent, json!({ "sent": "bool", "expires_in_minutes": "number" }));
-    let (_, confirmed) = anon.post("/api/auth/email/confirm", json!({ "token": app.emailed_token() })).await;
+    let (_, confirmed) = anon.post("/api/auth/email/confirm", json!({ "token": app.emailed_token(), "password": TEST_PASSWORD })).await;
     has_shape("POST /api/auth/email/confirm", &confirmed, me_shape());
+    // Logging in with the password gives the page the same.
+    has_shape("POST /api/auth/log-in", &anon.post("/api/auth/log-in", json!({ "email": "grace@example.com", "password": TEST_PASSWORD })).await.1, me_shape());
     assert_eq!(anon.get("/api/auth/providers").await.1, json!({ "providers": [] }));
     let (with_providers, _, _) = app_with_fake_providers().await;
     has_shape("GET /api/auth/providers", &with_providers.anonymous().get("/api/auth/providers").await.1, json!({ "providers": [{ "id": "string", "name": "string" }] }));

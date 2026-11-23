@@ -55,7 +55,7 @@ Anything after the mode goes to the tool behind it:
 
 `compose.test.yaml` starts the site as production runs it: the nginx image, the release build of the API, the API and the worker as two services, and Postgres (in memory, empty at every start). Two things stand in:
 
-- **Email**: Mailpit catches every message; the tests read sign-in links from it.
+- **Email**: Mailpit catches every message; the tests read the sign-up and new-password links from it.
 - **Stripe**: `tests/ui/fake-stripe/server.mjs` is Stripe's API, its Checkout page and its customer portal, as plain pages with buttons ("Pay", "Pay, message arrives late", "Go back without paying"). It signs its messages to the site as Stripe does. No money moves.
 - **The AI**: `tests/ui/fake-ai/server.mjs` answers for the language model and for Jev, the screen. What it answers depends on words in the description; the list is at the top of that file. The tests cost nothing and never call a real model.
 

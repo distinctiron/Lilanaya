@@ -1,8 +1,8 @@
-//! Sign-in by emailed link, the session, and what the signed-in user is entitled to.
+//! Signing up by emailed link, logging in with a password, the session, and what the signed-in user is entitled to.
 
 use super::{parse_json, ApiResult, Shared};
 use crate::config::Allowance;
-use crate::auth::{hash_token, new_token, session_cookie, session_token, User, Viewer, SIGN_IN_LINK_MINUTES};
+use crate::auth::{hash_password, hash_token, new_token, session_cookie, session_token, verify_password, User, Viewer, MAX_PASSWORD_CHARS, MIN_PASSWORD_CHARS, SIGN_IN_LINK_MINUTES};
 use crate::error::ApiError;
 use crate::worker::AppState;
 use axum::body::Bytes;
@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::OnceLock;
 
 pub(super) const MAX_DISPLAY_NAME_CHARS: usize = 60;
 
@@ -49,7 +50,8 @@ pub(super) fn normalise_email(raw: &str) -> Option<String> {
     plausible.then_some(email)
 }
 
-/// Emails a one-time link that logs the visitor in. Answers 202 whether or not the address has an account:
+/// Emails a one-time link. Whoever opens it chooses a password and is logged in: that is how signing up
+/// is finished, and how a forgotten password is replaced. Answers 202 whether or not the address has an account:
 /// someone who asks to log in with an address that has none is told so in the email, not on the page,
 /// so the page cannot be used to find out who has an account.
 pub async fn request_link(State(state): Shared, body: Result<Bytes, BytesRejection>) -> Result<(StatusCode, Json<Value>), ApiError> {
@@ -71,8 +73,8 @@ pub async fn request_link(State(state): Shared, body: Result<Bytes, BytesRejecti
         )
     } else {
         let link = format!("{site}/log-in/confirm?token={token}");
-        let (subject, what) = if known { ("Your Lilanaya log-in link", "log in to Lilanaya") } else { ("Finish signing up to Lilanaya", "finish signing up to Lilanaya") };
-        (subject, format!("Open this link to {what}:\n\n{link}\n\nIt works once and for {SIGN_IN_LINK_MINUTES} minutes. If you did not ask for it, ignore this email: nobody can get in without the link.\n"))
+        let (subject, what) = if known { ("Choose a new Lilanaya password", "choose a new password and log in to Lilanaya") } else { ("Finish signing up to Lilanaya", "choose a password and finish signing up to Lilanaya") };
+        (subject, format!("Open this link to {what}:\n\n{link}\n\nIt works once and for {SIGN_IN_LINK_MINUTES} minutes. If you did not ask for it, ignore this email: nothing changes and nobody can get in without the link.\n"))
     };
     state.mailer.send(&email, subject, &text).await.map_err(|e| ApiError::internal(format!("send log-in email: {e}")))?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "sent": true, "expires_in_minutes": SIGN_IN_LINK_MINUTES }))))
@@ -82,20 +84,79 @@ pub async fn request_link(State(state): Shared, body: Result<Bytes, BytesRejecti
 #[serde(deny_unknown_fields)]
 struct ConfirmBody {
     token: String,
+    /// The password to log in with from now on.
+    password: String,
 }
 
-/// Trades the token from the emailed link for a session cookie; creates the user if this is a sign-up.
+/// Trades the token from the emailed link, with the password the visitor chose, for a session cookie.
+/// Creates the user if this is a sign-up; replaces the password, and ends every other session, if it is not.
 pub async fn confirm_link(State(state): Shared, body: Result<Bytes, BytesRejection>) -> Result<Response, ApiError> {
     let req: ConfirmBody = parse_json(body)?;
+    // Before the link is used up: a password that will not do must not cost the visitor their link.
+    let length = req.password.chars().count();
+    if !(MIN_PASSWORD_CHARS..=MAX_PASSWORD_CHARS).contains(&length) {
+        return Err(ApiError::invalid("The password is not valid", vec![lilanaya_engine::Issue::new("password", format!("must be {MIN_PASSWORD_CHARS} to {MAX_PASSWORD_CHARS} characters"))]));
+    }
     let Some(email) = state.store.consume_sign_in_token(&hash_token(req.token.trim())).await? else {
         return Err(ApiError::bad_request("invalid_token", "This link has expired or was already used. Ask for a new one."));
     };
+    let password = req.password;
+    let hash = tokio::task::spawn_blocking(move || hash_password(&password)).await.map_err(|e| ApiError::internal(format!("hash password: {e}")))?;
     let default_name: String = email.split('@').next().unwrap_or("player").chars().take(MAX_DISPLAY_NAME_CHARS).collect();
     let user = state.store.upsert_user(&email, &default_name).await?;
+    let user = state.store.set_password(user.id, &hash).await?;
+    start_session(&state, &user).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LogInBody {
+    email: String,
+    password: String,
+}
+
+/// A hash no password opens, checked when the address has no password to check,
+/// so that the answer takes as long whether or not the address has an account.
+fn nobodys_hash() -> &'static str {
+    static HASH: OnceLock<String> = OnceLock::new();
+    HASH.get_or_init(|| hash_password(&new_token()))
+}
+
+/// Logs in with an email address and a password. A wrong address and a wrong password get the same answer,
+/// and after too many wrong passwords the address is refused for a while, whatever is tried.
+pub async fn log_in(State(state): Shared, body: Result<Bytes, BytesRejection>) -> Result<Response, ApiError> {
+    let req: LogInBody = parse_json(body)?;
+    let wrong = || ApiError::new(StatusCode::UNAUTHORIZED, "invalid_credentials", "Wrong email address or password");
+    let Some(email) = normalise_email(&req.email) else { return Err(wrong()) };
+    // Counted before the password is looked at, so guesses arriving together cannot all be tried.
+    let Some(attempt) = state.store.begin_log_in_attempt(&email).await? else {
+        return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "too_many_requests", "Too many wrong passwords for this address. Try again in 15 minutes, or choose a new password by email."));
+    };
+    let (user, hash) = match state.store.password_user(&email).await? {
+        Some((user, Some(hash))) => (Some(user), Some(hash)),
+        _ => (None, None),
+    };
+    let password = req.password;
+    let right = tokio::task::spawn_blocking(move || match hash {
+        Some(hash) => verify_password(&password, &hash),
+        None => {
+            verify_password(&password, nobodys_hash());
+            false
+        }
+    })
+    .await
+    .map_err(|e| ApiError::internal(format!("check password: {e}")))?;
+    let Some(user) = user.filter(|_| right) else { return Err(wrong()) };
+    state.store.forget_log_in_attempt(attempt).await?;
+    start_session(&state, &user).await
+}
+
+/// A new session for `user`: the cookie, and the user as the front end wants them.
+async fn start_session(state: &AppState, user: &User) -> Result<Response, ApiError> {
     let session = new_token();
     state.store.create_session(user.id, &hash_token(&session)).await?;
     let cookie = session_cookie(Some(&session), state.config.secure_cookies());
-    Ok(([(header::SET_COOKIE, cookie)], Json(me_json(&state, &user).await?)).into_response())
+    Ok(([(header::SET_COOKIE, cookie)], Json(me_json(state, user).await?)).into_response())
 }
 
 /// Ends the session and clears the cookie. Fine to call when not signed in.
@@ -237,6 +298,7 @@ async fn me_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
         "display_name": user.display_name,
         "roles": user.roles,
         "plan": user.plan,
+        "has_password": user.has_password,
         "entitlements": entitlements_json(user),
         "usage": usage_json(state, user).await?,
         "features": { "compile": state.llm.is_some(), "billing": state.billing.is_some() },

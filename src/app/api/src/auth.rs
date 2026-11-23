@@ -1,8 +1,11 @@
 //! Sessions: who is asking. A signed-in browser carries an opaque random
 //! token in an HttpOnly cookie; the database keeps only its SHA-256.
+//! Passwords are kept as Argon2id hashes, each with a salt of its own.
 
 use crate::error::ApiError;
 use crate::worker::AppState;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::Argon2;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -12,6 +15,8 @@ use std::sync::Arc;
 pub const SESSION_COOKIE: &str = "lilanaya_session";
 pub const SESSION_DAYS: i64 = 30;
 pub const SIGN_IN_LINK_MINUTES: i64 = 15;
+pub const MIN_PASSWORD_CHARS: usize = 8;
+pub const MAX_PASSWORD_CHARS: usize = 200;
 
 #[derive(Clone, Debug)]
 pub struct User {
@@ -20,6 +25,22 @@ pub struct User {
     pub display_name: String,
     pub roles: Vec<String>,
     pub plan: String,
+    /// Whether a password has been chosen (an account made through Google and the like may have none).
+    pub has_password: bool,
+}
+
+/// What is kept of a password: an Argon2id hash with a new random salt, as a PHC string.
+/// Slow on purpose, so call it off the async threads (`spawn_blocking`).
+pub fn hash_password(password: &str) -> String {
+    let mut salt = [0u8; 16];
+    getrandom::fill(&mut salt).expect("the operating system's random source");
+    let salt = SaltString::encode_b64(&salt).expect("16 bytes make a salt");
+    Argon2::default().hash_password(password.as_bytes(), &salt).expect("Argon2 with its default settings").to_string()
+}
+
+/// Whether `password` is the one `hash` was made from. As slow as hashing.
+pub fn verify_password(password: &str, hash: &str) -> bool {
+    PasswordHash::new(hash).is_ok_and(|parsed| Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok())
 }
 
 /// 256 random bits as 64 hex digits.
@@ -127,6 +148,26 @@ mod tests {
         assert_eq!(hash_token(&token), hash_token(&token));
         assert_ne!(hash_token(&token), token);
         assert_ne!(hash_token(&token), hash_token(&token.to_uppercase()));
+    }
+
+    #[test]
+    fn a_password_is_kept_as_a_salted_argon2id_hash_that_only_it_opens() {
+        let hash = hash_password("correct horse battery");
+        assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{hash}");
+        assert!(!hash.contains("correct"));
+        assert!(verify_password("correct horse battery", &hash));
+        for wrong in ["", "correct horse", "correct horse battery ", "Correct horse battery", &hash] {
+            assert!(!verify_password(wrong, &hash), "{wrong:?}");
+        }
+        // The same password twice gives two hashes: each has its own salt.
+        let again = hash_password("correct horse battery");
+        assert_ne!(hash, again);
+        assert!(verify_password("correct horse battery", &again));
+        // Something that is not a hash opens for nothing.
+        for broken in ["", "correct horse battery", "$argon2id$", &hash[..hash.len() - 10]] {
+            assert!(!verify_password("correct horse battery", broken), "{broken:?}");
+        }
+        assert_eq!((MIN_PASSWORD_CHARS, MAX_PASSWORD_CHARS), (8, 200));
     }
 
     #[test]

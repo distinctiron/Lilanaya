@@ -1,7 +1,7 @@
 // @safety What the deployed site must hold to whatever is thrown at it: headers, limits at the edge,
 // text that tries to be markup, and where a visitor can be sent.
 import { request as playwrightRequest } from '@playwright/test';
-import { expect, open, test, title, unique } from '../fixtures.js';
+import { expect, open, PASSWORD, test, title, unique } from '../fixtures.js';
 
 const CSP = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'";
 
@@ -114,6 +114,7 @@ test('@safety a link meant to send the visitor elsewhere after logging in leads 
 		await page.getByRole('button', { name: 'Sign up' }).click();
 		await expect(title(page)).toHaveText('Check your email');
 		await page.goto(mail.linkIn(await mail.next(who)));
+		await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
 		await page.getByRole('button', { name: 'Continue' }).click();
 		await expect(title(page)).toHaveText('Profile');
 		expect(new URL(page.url()).pathname, next).toBe('/profile');

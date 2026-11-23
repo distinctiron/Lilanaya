@@ -56,7 +56,8 @@ fn table(p: &str, q: &str, r: i64, s: i64, world: &Value) -> Vec<Row> {
         get("/api/worlds/{id}/pairwise", format!("{pd_world}/pairwise?run_id={r}"), [404, 404, 404]),
         // Signing in is for people who are not signed in.
         row(M::POST, "/api/auth/email", "/api/auth/email", Some(json!({ "email": "someone@example.com" })), [202, 202, 202]),
-        row(M::POST, "/api/auth/email/confirm", "/api/auth/email/confirm", Some(json!({ "token": "0".repeat(64) })), [400, 400, 400]),
+        row(M::POST, "/api/auth/email/confirm", "/api/auth/email/confirm", Some(json!({ "token": "0".repeat(64), "password": "a password" })), [400, 400, 400]),
+        row(M::POST, "/api/auth/log-in", "/api/auth/log-in", Some(json!({ "email": "ada@example.com", "password": TEST_PASSWORD })), OPEN),
         get("/api/auth/providers", "/api/auth/providers".into(), OPEN),
         get("/api/auth/{provider}/start", "/api/auth/google/start".into(), REDIRECT),
         get("/api/auth/{provider}/callback", "/api/auth/google/callback?code=x&state=y".into(), REDIRECT),

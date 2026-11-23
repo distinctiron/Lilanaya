@@ -1,7 +1,7 @@
-// Accounts: signing up and logging in by emailed link, the profile, logging out.
-import { expect, open, test, title } from '../fixtures.js';
+// Accounts: signing up by emailed link, choosing a password, logging in with it, the profile, logging out.
+import { expect, open, PASSWORD, test, title } from '../fixtures.js';
 
-test('signing up: what an account includes, the emailed link, and the first look at the profile', async ({ page, address, mail }) => {
+test('signing up: what an account includes, the emailed link, choosing a password, and the first look at the profile', async ({ page, address, mail }) => {
 	await open(page, '/sign-up', 'Sign up');
 	// The limits are told before anyone signs up, with this server's numbers.
 	const plan = page.locator('[data-role="plan-summary"]');
@@ -16,15 +16,31 @@ test('signing up: what an account includes, the emailed link, and the first look
 	await page.getByRole('button', { name: 'Sign up' }).click();
 	await expect(title(page)).toHaveText('Check your email');
 	await expect(title(page)).toBeFocused();
+	await expect(page.locator('#main')).toContainText('A link to choose your password and finish signing up is on its way');
 	await expect(page.locator('#main')).toContainText('The link works once · Valid for 15 minutes');
 
 	const email = await mail.next(address);
 	expect(email.subject).toBe('Finish signing up to Lilanaya');
+	expect(email.text).toContain('Open this link to choose a password and finish signing up to Lilanaya:');
 	expect(email.text).toContain('It works once and for 15 minutes.');
 	await page.goto(mail.linkIn(email));
-	await expect(title(page)).toHaveText('Almost there');
+	await expect(title(page)).toHaveText('Choose a password');
 	// The one-time token is taken out of the address bar at once.
 	await expect(page).toHaveURL(/\/log-in\/confirm$/);
+	// What is typed is hidden unless the visitor asks to see it.
+	const password = page.getByLabel('Password', { exact: true });
+	await expect(password).toHaveAttribute('type', 'password');
+	await expect(password).toHaveAttribute('autocomplete', 'new-password');
+	await password.pressSequentially('short');
+	await page.getByLabel('Show password').check();
+	await expect(password).toHaveAttribute('type', 'text');
+	await page.getByLabel('Show password').uncheck();
+	await expect(password).toHaveAttribute('type', 'password');
+	// Too short a password is stopped by the browser, and the link is not used up.
+	await page.getByRole('button', { name: 'Continue' }).click();
+	expect(await password.evaluate((el) => el.validity.valid)).toBe(false);
+	await expect(title(page)).toHaveText('Choose a password');
+	await password.fill(PASSWORD);
 	await page.getByRole('button', { name: 'Continue' }).click();
 
 	await expect(title(page)).toHaveText('Profile');
@@ -37,6 +53,7 @@ test('signing up: what an account includes, the emailed link, and the first look
 	await expect(main).toContainText('3 per world · They never come back');
 	await expect(main).toContainText('None used yet');
 	await expect(main.locator('[data-role="plan-status"]')).toHaveText('Free');
+	await expect(main.locator('[data-role="password"]')).toContainText('You log in with your email address and your password.');
 	// Nothing is promised that is not built.
 	await expect(main).not.toContainText('Private worlds');
 	// The header now shows who is logged in instead of the way in.
@@ -56,20 +73,29 @@ test('an emailed link works once', async ({ page, address, mail, someone }) => {
 	await expect(title(page)).toHaveText('Check your email');
 	const link = mail.linkIn(await mail.next(address));
 	await page.goto(link);
+	await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
 	await page.getByRole('button', { name: 'Continue' }).click();
 	await expect(title(page)).toHaveText('Profile');
 
 	// Someone else who got hold of the same link gets nowhere with it.
 	const thief = await someone({ signedIn: false });
 	await thief.page.goto(link);
+	await thief.page.getByLabel('Password', { exact: true }).fill('a password of the thief');
 	await thief.page.getByRole('button', { name: 'Continue' }).click();
 	await expect(thief.page.getByRole('alert')).toContainText('This link has expired or was already used. Ask for a new one.');
 	await expect(thief.page.getByRole('link', { name: 'Ask for a new link' })).toBeVisible();
+	await expect(thief.page.getByRole('button', { name: 'Continue' })).toBeHidden();
 	await thief.page.goto('/profile');
 	await expect(title(thief.page)).toHaveText('Log in first');
+	// And the password the thief tried to set is not the account's.
+	await open(thief.page, '/log-in', 'Log in');
+	await thief.page.getByLabel('Email address').fill(address);
+	await thief.page.getByLabel('Password', { exact: true }).fill('a password of the thief');
+	await thief.page.getByRole('button', { name: 'Log in' }).click();
+	await expect(thief.page.getByRole('alert')).toHaveText('Wrong email address or password');
 });
 
-test('logging out, and logging in again with a new link', async ({ page, account, mail }) => {
+test('logging out, and logging in again with the password, no email needed', async ({ page, account, mail }) => {
 	await open(page, '/profile', 'Profile');
 	await page.getByRole('button', { name: 'Log out' }).click();
 	await expect(title(page)).toHaveText('Worlds');
@@ -80,22 +106,84 @@ test('logging out, and logging in again with a new link', async ({ page, account
 
 	await page.getByRole('link', { name: 'Log in' }).first().click();
 	await expect(title(page)).toHaveText('Log in');
+	const password = page.getByLabel('Password', { exact: true });
+	await expect(password).toHaveAttribute('type', 'password');
+	await expect(password).toHaveAttribute('autocomplete', 'current-password');
+
+	// A wrong password, and an address nobody has, are told the same; what was typed stays.
+	await page.getByLabel('Email address').fill(account.email);
+	await password.fill('not the password');
+	await page.getByRole('button', { name: 'Log in' }).click();
+	await expect(page.getByRole('alert')).toHaveText('Wrong email address or password');
+	await expect(password).toBeFocused();
+	await expect(page.getByRole('button', { name: 'Log in' })).toBeEnabled();
+	await page.getByLabel('Email address').fill(`nobody-${account.email}`);
+	await password.fill(PASSWORD);
+	await page.getByRole('button', { name: 'Log in' }).click();
+	await expect(page.getByRole('alert')).toHaveText('Wrong email address or password');
+
+	await page.getByLabel('Email address').fill(`  ${account.email.toUpperCase()} `);
+	await page.getByRole('button', { name: 'Log in' }).click();
+	// Back where the log-in was asked for, and no email was sent for it: the one from signing up is the only one.
+	await expect(title(page)).toHaveText('Profile');
+	await expect(page.locator('#main dl.rules')).toContainText(account.email);
+	expect(await mail.all(account.email)).toHaveLength(1);
+});
+
+test('a forgotten password: a link by email, a new password, and the old one is over', async ({ page, account, mail, someone }) => {
+	// The same person is also logged in on another device.
+	const other = await someone({ signedIn: false });
+	await other.context.addCookies(await page.context().cookies());
+	const elsewhere = other.page;
+	await open(elsewhere, '/profile', 'Profile');
+
+	await page.context().clearCookies();
+	await open(page, '/log-in?next=%2Fruns', 'Log in');
+	await page.getByRole('link', { name: 'Forgot your password, or never chose one?' }).click();
+	await expect(title(page)).toHaveText('Forgot password');
+	await expect(page).toHaveURL(/\/log-in\/forgot\?next=%2Fruns$/);
 	await page.getByLabel('Email address').fill(account.email);
 	await page.getByRole('button', { name: 'Email me a link' }).click();
 	await expect(title(page)).toHaveText('Check your email');
 	// The page says the same whether or not the address has an account.
-	await expect(page.locator('#main')).toContainText('If the address has an account, it holds your log-in link.');
+	await expect(page.locator('#main')).toContainText('If the address has an account, it holds a link to choose a new password.');
 	const email = await mail.next(account.email, 1);
-	expect(email.subject).toBe('Your Lilanaya log-in link');
+	expect(email.subject).toBe('Choose a new Lilanaya password');
 	await page.goto(mail.linkIn(email));
+	await expect(title(page)).toHaveText('Choose a password');
+	await page.getByLabel('Password', { exact: true }).fill('a brand new password');
 	await page.getByRole('button', { name: 'Continue' }).click();
-	// Back where the log-in was asked for.
-	await expect(title(page)).toHaveText('Profile');
-	await expect(page.locator('#main dl.rules')).toContainText(account.email);
+	// Logged in, and on to where the visitor was going.
+	await expect(title(page)).toHaveText('Runs');
+
+	// The other device is logged out, the old password is over, the new one works.
+	await open(elsewhere, '/profile', 'Log in first');
+	await open(elsewhere, '/log-in', 'Log in');
+	await elsewhere.getByLabel('Email address').fill(account.email);
+	await elsewhere.getByLabel('Password', { exact: true }).fill(PASSWORD);
+	await elsewhere.getByRole('button', { name: 'Log in' }).click();
+	await expect(elsewhere.getByRole('alert')).toHaveText('Wrong email address or password');
+	await elsewhere.getByLabel('Password', { exact: true }).fill('a brand new password');
+	await elsewhere.getByRole('button', { name: 'Log in' }).click();
+	await expect(title(elsewhere)).toHaveText('Profile');
 });
 
-test('logging in with an address that has no account makes none', async ({ page, address, mail }) => {
-	await open(page, '/log-in', 'Log in');
+test('the profile sends a link to change the password', async ({ page, account, mail }) => {
+	await open(page, '/profile', 'Profile');
+	const section = page.locator('[data-role="password"]');
+	await section.getByRole('button', { name: 'Email me a link to change it' }).click();
+	await expect(section.getByRole('status')).toHaveText(`The link is on its way to ${account.email} · Valid for 15 minutes`);
+	await expect(section.getByRole('button', { name: 'Email me a link to change it' })).toBeDisabled();
+	const email = await mail.next(account.email, 1);
+	expect(email.subject).toBe('Choose a new Lilanaya password');
+	await page.goto(mail.linkIn(email));
+	await page.getByLabel('Password', { exact: true }).fill('a brand new password');
+	await page.getByRole('button', { name: 'Continue' }).click();
+	await expect(title(page)).toHaveText('Profile');
+});
+
+test('asking for a link with an address that has no account makes none', async ({ page, address, mail }) => {
+	await open(page, '/log-in/forgot', 'Forgot password');
 	await page.getByLabel('Email address').fill(address);
 	await page.getByRole('button', { name: 'Email me a link' }).click();
 	await expect(title(page)).toHaveText('Check your email');
@@ -114,6 +202,7 @@ test('a page that needs an account sends the visitor back to it after logging in
 	await page.getByRole('button', { name: 'Sign up' }).click();
 	await expect(title(page)).toHaveText('Check your email');
 	await page.goto(mail.linkIn(await mail.next(address)));
+	await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
 	await page.getByRole('button', { name: 'Continue' }).click();
 	await expect(title(page)).toHaveText('New run');
 	await expect(page).toHaveURL(/\/runs\/new$/);
@@ -139,7 +228,7 @@ test('an address that is not one is stopped before anything is sent', async ({ p
 test('a link without its token, and a failed sign-in through another site, are explained', async ({ page }) => {
 	await open(page, '/log-in/confirm', 'This link is not complete');
 	await page.getByRole('link', { name: 'Ask for a new link' }).click();
-	await expect(title(page)).toHaveText('Log in');
+	await expect(title(page)).toHaveText('Forgot password');
 
 	await open(page, '/log-in?error=cancelled', 'Log in');
 	await expect(page.getByRole('alert').first()).toHaveText('That was cancelled. Nothing was changed.');
@@ -161,7 +250,7 @@ test('the display name can be changed and is checked', async ({ page, account })
 	await expect(name).toHaveValue(account.user.display_name);
 	await name.fill('  Countess Ada  ');
 	await page.getByRole('button', { name: 'Save name' }).click();
-	await expect(page.getByRole('status')).toHaveText('Saved');
+	await expect(page.locator('form', { has: page.getByLabel('Display name') }).getByRole('status')).toHaveText('Saved');
 	// The header follows at once.
 	await expect(page.getByRole('link', { name: 'Profile of Countess Ada' })).toBeVisible();
 	await page.reload();

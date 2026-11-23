@@ -31,7 +31,7 @@ Initial target world: Prisoner’s Dilemma (repeated). The system is world‑agn
 - Back end: Rust (axum on tokio), one Cargo workspace rooted at the repository root.
 - Front end: vanilla JavaScript (native ES modules, no framework or build step), served by nginx.
 - Storage: Postgres only (worlds, strategies, runs, traces, KPI snapshots; the `runs` table doubles as the job queue). A run's downloadable files are built on request from what the database holds.
-- Accounts: sign-in by emailed one-time link, or through Google, Apple, Facebook or GitHub (each behind its own flag, such as `GOOGLE_SIGN_IN=on`, all off by default; see `.env.example`); session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
+- Accounts: sign-up by emailed one-time link, where a password is chosen; log-in with email address and password (a forgotten one is replaced through a new link), or through Google, Apple, Facebook or GitHub (each behind its own flag, such as `GOOGLE_SIGN_IN=on`, all off by default; see `.env.example`); session cookie. Strategies and runs have an owner; private ones are visible to their owner only.
 - Code strategies: JavaScript, run in an embedded QuickJS interpreter with a 1 MB memory cap and a step budget, no clock, no randomness, no I/O. Everything that executes a strategy (previews, saves, runs) happens in a child process with a time limit, so a slow strategy is stopped instead of holding the server.
 - Plain-English strategy compile: a language model reached through Vercel AI Gateway. Every description is first screened by Jev (a classifier, through the same gateway); one that is not a strategy description never reaches the model. Compile is limited per user per hour and for all users together per day.
 - Usage limits: runs per month by plan, runs waiting at once, strategy checks and compiles per hour (see `.env.example`); request limits per client address in nginx.
@@ -76,7 +76,7 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 |---|---|
 | `GET /api/worlds`, `GET /api/worlds/{id}` | World templates |
 | `POST /api/worlds/validate` | Checks a world document: `{"valid", "errors": [{path, message}]}` |
-| `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/sign-out` | Email a one-time link (`intent`: `sign_up` makes the account if there is none, `log_in` never does and says so in the email); trade its token for a session cookie; end the session |
+| `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/log-in`, `POST /api/auth/sign-out` | Email a one-time link (`intent`: `sign_up` makes the account if there is none, `log_in` never does and says so in the email); trade its token and a chosen `password` for a session cookie (this sets the password and ends the user's other sessions); log in with `email` and `password`; end the session |
 | `GET /api/plans` | What each plan includes (strategies the AI writes, runs) and, with payment on, what the subscription and the packs cost. Public |
 | `GET /api/billing` | What the signed-in user pays for: subscription, what is left of their packs, what they bought |
 | `POST /api/billing/checkout`, `POST /api/billing/portal` | Start Stripe's Checkout page (`{"item": "subscription" \| "small" \| "medium" \| "large", "agree": true}`) or its customer portal; both answer `{"url"}` |

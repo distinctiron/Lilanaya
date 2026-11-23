@@ -6,5 +6,12 @@ members = ["src/app/api", "src/engine"]
 edition = "2021"
 version = "0.1.0"
 
+# Hashing a password is heavy on purpose. Unoptimised it takes seconds, and every API test logs in.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 [profile.release]
 strip = true

@@ -21,6 +21,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tower::ServiceExt;
 
+/// The password every account made by `signed_in_as` has.
+const TEST_PASSWORD: &str = "correct horse battery";
+
 /// The API with its own schema and worker, seen through one
 /// browser: `cookie` is that browser's session. `TestApp::new` starts signed in
 /// as ada@example.com; `anonymous` and `signed_in_as` give other browsers.
@@ -76,11 +79,17 @@ impl TestApp {
         body[start..].chars().take_while(|c| c.is_ascii_hexdigit()).collect()
     }
 
-    /// Goes through the emailed-link sign-in and returns a browser holding the session.
+    /// A browser holding a session of `email`. The first time, that is signing up: the emailed link,
+    /// and `TEST_PASSWORD` chosen as the password. After that it is logging in with that password.
     async fn signed_in_as(&self, email: &str) -> Self {
-        let (status, body) = self.anonymous().post("/api/auth/email", json!({ "email": email })).await;
-        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
-        let (status, headers, body) = self.anonymous().send(Method::POST, "/api/auth/email/confirm", Some(json!({ "token": self.emailed_token() }))).await;
+        let known = self.store.user_exists(&email.trim().to_lowercase()).await.unwrap();
+        let (status, headers, body) = if known {
+            self.anonymous().send(Method::POST, "/api/auth/log-in", Some(json!({ "email": email, "password": TEST_PASSWORD }))).await
+        } else {
+            let (status, body) = self.anonymous().post("/api/auth/email", json!({ "email": email })).await;
+            assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+            self.anonymous().send(Method::POST, "/api/auth/email/confirm", Some(json!({ "token": self.emailed_token(), "password": TEST_PASSWORD }))).await
+        };
         assert_eq!(status, StatusCode::OK, "{body}");
         let set_cookie = headers["set-cookie"].to_str().unwrap();
         assert!(set_cookie.contains("HttpOnly") && set_cookie.contains("SameSite=Lax"), "{set_cookie}");

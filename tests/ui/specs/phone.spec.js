@@ -1,5 +1,5 @@
 // The site on an iPhone (Safari's engine, phone width): the menu, no sideways scrolling, and the main journeys.
-import { expect, open, test, title } from '../fixtures.js';
+import { expect, open, PASSWORD, test, title } from '../fixtures.js';
 
 /** How far the page can be scrolled sideways, in pixels. None is right. */
 const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -80,6 +80,7 @@ test('signing up, writing a strategy and running it, all on the phone', async ({
 	await page.getByRole('button', { name: 'Sign up' }).tap();
 	await expect(title(page)).toHaveText('Check your email');
 	await page.goto(mail.linkIn(await mail.next(address)));
+	await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
 	await page.getByRole('button', { name: 'Continue' }).tap();
 	await expect(title(page)).toHaveText('Profile');
 

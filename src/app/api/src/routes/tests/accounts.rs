@@ -1,9 +1,9 @@
-//! Accounts: the emailed link, the session, the profile, usage and plans.
+//! Accounts: the emailed link, the password, the session, the profile, usage and plans.
 
 use super::*;
 
 #[tokio::test]
-async fn sign_in_by_emailed_link_then_sign_out() {
+async fn sign_up_by_emailed_link_log_in_with_the_password_then_sign_out() {
     let app = TestApp::new().await;
     let anon = app.anonymous();
 
@@ -28,19 +28,20 @@ async fn sign_in_by_emailed_link_then_sign_out() {
     let token = app.emailed_token();
     assert_eq!(token.len(), 64);
 
-    let (status, body) = anon.post("/api/auth/email/confirm", json!({ "token": "0".repeat(64) })).await;
+    let (status, body) = anon.post("/api/auth/email/confirm", json!({ "token": "0".repeat(64), "password": "a password of my own" })).await;
     assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("invalid_token")));
 
-    let (status, headers, me) = anon.send(Method::POST, "/api/auth/email/confirm", Some(json!({ "token": token }))).await;
+    let (status, headers, me) = anon.send(Method::POST, "/api/auth/email/confirm", Some(json!({ "token": token, "password": "a password of my own" }))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me["email"], "grace@example.com");
+    assert_eq!(me["has_password"], true);
     assert_eq!(me["display_name"], "grace");
     assert_eq!(me["roles"], json!(["user"]));
     assert_eq!(me["plan"], "free");
     let grace = TestApp { cookie: Some(headers["set-cookie"].to_str().unwrap().split(';').next().unwrap().to_string()), ..app.clone() };
 
     // The link works once.
-    let (status, _) = anon.post("/api/auth/email/confirm", json!({ "token": token })).await;
+    let (status, _) = anon.post("/api/auth/email/confirm", json!({ "token": token, "password": "a password of my own" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let (status, me) = grace.get("/api/me").await;
@@ -51,9 +52,13 @@ async fn sign_in_by_emailed_link_then_sign_out() {
     let (status, _) = grace.call(Method::PATCH, "/api/me", Some(json!({ "display_name": " " }))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
-    // Signing in again later finds the same user, name kept.
-    let again = app.signed_in_as("GRACE@example.com").await;
-    let (_, me2) = again.get("/api/me").await;
+    // Logging in later takes the address and the password, no email, and finds the same user, name kept.
+    let sent = app.mail.lock().unwrap().len();
+    let (status, headers, me2) = anon.send(Method::POST, "/api/auth/log-in", Some(json!({ "email": "GRACE@example.com ", "password": "a password of my own" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(app.mail.lock().unwrap().len(), sent);
+    let again = TestApp { cookie: cookie_set(&headers, "lilanaya_session"), ..app.clone() };
+    assert_eq!(again.get("/api/me").await.1, me2);
     assert_eq!((me2["id"].clone(), me2["display_name"].as_str()), (me["id"].clone(), Some("Grace H.")));
 
     let (status, headers, _) = grace.send(Method::POST, "/api/auth/sign-out", None).await;
@@ -110,18 +115,23 @@ async fn logging_in_never_makes_an_account_and_signing_up_does() {
 
     // Signing up sends the link, and using it makes the account.
     assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": "sign_up" })).await.0, StatusCode::ACCEPTED);
-    assert_eq!(latest().0, "Finish signing up to Lilanaya");
-    let (status, me) = anon.post("/api/auth/email/confirm", json!({ "token": app.emailed_token() })).await;
+    let (subject, text) = latest();
+    assert_eq!(subject, "Finish signing up to Lilanaya");
+    assert!(text.contains("Open this link to choose a password and finish signing up to Lilanaya:"), "{text}");
+    let (status, me) = anon.post("/api/auth/email/confirm", json!({ "token": app.emailed_token(), "password": TEST_PASSWORD })).await;
     assert_eq!((status, me["email"].as_str()), (StatusCode::OK, Some("new@example.com")));
 
-    // From then on both ways send a log-in link.
+    // From then on both ways send a link to choose a new password.
     for intent in ["log_in", "sign_up"] {
         assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": intent })).await.0, StatusCode::ACCEPTED);
         let (subject, text) = latest();
-        assert_eq!(subject, "Your Lilanaya log-in link");
+        assert_eq!(subject, "Choose a new Lilanaya password");
+        assert!(text.contains("Open this link to choose a new password and log in to Lilanaya:"), "{text}");
         assert!(text.contains("http://localhost:3000/log-in/confirm?token="), "{text}");
     }
     assert_eq!(anon.post("/api/auth/email", json!({ "email": "new@example.com", "intent": "browse" })).await.0, StatusCode::BAD_REQUEST);
+    // A link that was asked for and never opened changes nothing: the password still works.
+    assert_eq!(anon.post("/api/auth/log-in", json!({ "email": "new@example.com", "password": TEST_PASSWORD })).await.0, StatusCode::OK);
     app.close().await;
 }
 
@@ -139,5 +149,24 @@ async fn the_plans_are_public() {
             "billing": null,
         })
     );
+    app.close().await;
+}
+
+#[tokio::test]
+async fn an_account_made_through_another_site_has_no_password_until_one_is_chosen_by_email() {
+    let (app, fake, _) = app_with_fake_providers().await;
+    fake.approve_as(json!({ "sub": "g-1", "email": "eve@example.com", "email_verified": true, "name": "Eve" }));
+    let eve = app.federated("google", "").await.1.expect("eve is in");
+    let (_, me) = eve.get("/api/me").await;
+    assert_eq!(me["has_password"], false);
+    assert_eq!(app.get("/api/me").await.1["has_password"], true);
+
+    // The link to her address lets her choose one; it is the same account.
+    assert_eq!(eve.post("/api/auth/email", json!({ "email": "eve@example.com", "intent": "log_in" })).await.0, StatusCode::ACCEPTED);
+    let (status, with_password) = eve.post("/api/auth/email/confirm", json!({ "token": app.emailed_token(), "password": "eve's own password" })).await;
+    assert_eq!((status, with_password["id"].clone(), with_password["has_password"].clone()), (StatusCode::OK, me["id"].clone(), json!(true)));
+    assert_eq!(app.anonymous().post("/api/auth/log-in", json!({ "email": "eve@example.com", "password": "eve's own password" })).await.1["id"], me["id"]);
+    // And Google still lets her in.
+    assert!(app.federated("google", "").await.1.is_some());
     app.close().await;
 }

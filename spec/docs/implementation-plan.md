@@ -71,6 +71,7 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 ### 5a — Accounts (M0: 5.1, 5.2 stub, 5.4 readout, 5.5)
 
 - [x] Sign in by emailed link; session cookie; sign out; profile page (email, display name, roles, plan, runs left this month).
+- [x] Log in with a password (user, 2026-11-23): the emailed link is for signing up and for a forgotten password, and whoever opens it chooses a password; after that, logging in is address and password.
 - [x] Entitlement flags from the user's plan (`/api/me/entitlements`), no billing yet.
 - [x] Quota readout (`/api/usage`): runs used this month against the plan's allowance. Not enforced yet.
 - [x] Strategies and runs have an owner; private ones answer 404 to everyone else and are left out of lists and world analytics.

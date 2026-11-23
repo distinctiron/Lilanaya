@@ -75,6 +75,35 @@ function payment(user, billing, errors) {
 	]);
 }
 
+/** Whether a password has been chosen, and the way to choose another: a link to the account's own address. */
+function password(user) {
+	const status = h('p', { class: 'meta', role: 'status' });
+	const errors = h('div', { class: 'error-box', role: 'alert', hidden: true });
+	const ask = button(user.has_password ? 'Email me a link to change it' : 'Email me a link to choose one', {
+		onclick: async () => {
+			errors.hidden = true;
+			status.textContent = '';
+			ask.disabled = true;
+			try {
+				const sent = await postJson('/api/auth/email', { email: user.email, intent: 'log_in' });
+				status.textContent = `The link is on its way to ${user.email} · Valid for ${sent.expires_in_minutes} minutes`;
+			} catch (error) {
+				if (!(error instanceof ApiError)) console.error(error);
+				errors.replaceChildren(h('p', null, error instanceof ApiError ? error.message : 'The link could not be sent.'));
+				errors.hidden = false;
+				ask.disabled = false;
+			}
+		}
+	});
+	return h('div', { class: 'stack', 'data-role': 'password' }, [
+		sectionHeading('Password'),
+		h('p', null, user.has_password ? 'You log in with your email address and your password.' : 'You have not chosen a password yet, so you cannot log in with your email address.'),
+		h('p', { class: 'meta' }, 'Choosing a new password logs you out on every other device'),
+		errors,
+		h('div', { class: 'row' }, [ask, status])
+	]);
+}
+
 /** Taking the data away, and deleting the account. */
 function leaving(user, navigate) {
 	const email = h('input', { id: 'delete-email', name: 'email', type: 'email', autocomplete: 'off', required: true, 'aria-describedby': 'delete-hint' });
@@ -181,6 +210,7 @@ export async function profilePage({ navigate, refresh }) {
 						h('dd', null, user.plan === 'subscriber' ? 'Subscriber' : 'Free')
 					]),
 					form,
+					password(user),
 					payment(user, billing, paymentErrors),
 					paymentErrors
 				]),

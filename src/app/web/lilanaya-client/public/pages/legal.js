@@ -59,7 +59,7 @@ export const termsPage = page(
 			'Your account',
 			{
 				list: [
-					'You log in with a link sent to your email address, or through an account you have elsewhere. Keep access to that address: it is the key to your account.',
+					'You log in with your email address and a password you choose, or through an account you have elsewhere. Keep the password to yourself, and keep access to the address: a link sent to it is how a new password is chosen.',
 					'One account per person. You must be at least 18, or have a parent’s or guardian’s permission, to buy anything.',
 					['You can delete your account at any time from your ', link('profile', '/profile'), '.']
 				]
@@ -167,6 +167,7 @@ export const privacyPage = page(
 			{
 				list: [
 					'Your email address and the display name you choose. If you log in through Google, Apple, Facebook or GitHub, also that account’s id with them, and the name they give us the first time.',
+					'Your password, only as a one-way fingerprint (hash) that lets us check it and cannot be turned back into the password.',
 					'What you make: your strategies, the descriptions you gave the AI, and your runs and their results.',
 					'What you have used: when the AI wrote a strategy for you and in which world, what the screening step concluded about the description, and when you started runs. This is how limits and plans are kept.',
 					'What you have bought: your customer number at Stripe, the status and paid period of a subscription, and each pack with its date and amount. We never receive your card number.',
@@ -193,7 +194,7 @@ export const privacyPage = page(
 					'Render: runs the servers and the database, in Frankfurt, Germany.',
 					'Stripe: takes payments, sends receipts and works out VAT. Stripe gets your email address, your country and address for VAT, and your card details, which you give to Stripe directly.',
 					'Vercel AI Gateway and the AI model providers behind it: receive the description you write when you ask the AI for a strategy, and an id that tells accounts apart without saying who you are. Not your name or email address. We ask them to keep nothing of a request once it has been answered. This step may take place in the United States, under the EU’s standard contractual clauses or the EU–US Data Privacy Framework.',
-					'Our email delivery service: receives your email address to send you the log-in link.',
+					'Our email delivery service: receives your email address to send you the links for signing up and for choosing a new password.',
 					'Google, Apple, Facebook or GitHub, only if you choose to log in through one of them.'
 				]
 			},

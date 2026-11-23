@@ -409,7 +409,7 @@ export async function landingPage({ onLeave }) {
 				steps(),
 				h('div', { class: 'landing-close stack' }, [
 					h('p', null, linkButton('Create your first strategy', start, { primary: true, class: 'btn btn-primary btn-big' })),
-					user ? null : h('p', { class: 'meta' }, 'Sign up with your email. No password needed.'),
+					user ? null : h('p', { class: 'meta' }, 'Sign up with your email.'),
 					h('p', { class: 'meta' }, ['Want the full story first? ', h('a', { href: '/how-it-works' }, 'How it works'), ' has three short animations and a closer look at the Prisoner’s Dilemma.'])
 				])
 			])

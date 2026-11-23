@@ -60,6 +60,8 @@ pub struct StrategyRow {
 
 /// How many sign-in links one address may ask for per quarter of an hour.
 const SIGN_IN_LINKS_PER_WINDOW: i64 = 5;
+/// Wrong passwords an address may be tried with in 15 minutes.
+pub const LOG_IN_ATTEMPTS_PER_WINDOW: i64 = 10;
 
 /// What became of a request to queue a run.
 #[derive(Debug)]
@@ -108,6 +110,7 @@ const LOCK_PREVIEWS: i32 = 2;
 const LOCK_SIGN_IN: i32 = 3;
 const LOCK_COMPILE: i32 = 4;
 const LOCK_STRATEGIES: i32 = 5;
+const LOCK_LOG_IN: i32 = 6;
 const TAKE_LOCK: &str = "SELECT pg_advisory_xact_lock($1, $2)";
 
 /// One KPI value of one run, with the run's parameters.
@@ -135,7 +138,7 @@ const PAID_SUBSCRIPTION: &str = "EXISTS (SELECT 1 FROM subscriptions sub WHERE s
 /// The plan is worked out, not stored: a subscriber is someone whose subscription is paid for
 /// (or whose `plan` was set by hand, for accounts given away).
 fn user_columns() -> String {
-    format!("users.id, users.email, users.display_name, users.roles, CASE WHEN users.plan = 'subscriber' OR {PAID_SUBSCRIPTION} THEN 'subscriber' ELSE 'free' END AS plan")
+    format!("users.id, users.email, users.display_name, users.roles, CASE WHEN users.plan = 'subscriber' OR {PAID_SUBSCRIPTION} THEN 'subscriber' ELSE 'free' END AS plan, users.password_hash IS NOT NULL AS has_password")
 }
 
 /// When the allowance of user `$1` started to be counted: the start of the paid period for a paying
@@ -197,6 +200,7 @@ fn user_row(row: PgRow) -> Result<User, sqlx::Error> {
         display_name: row.try_get("display_name")?,
         roles: row.try_get("roles")?,
         plan: row.try_get("plan")?,
+        has_password: row.try_get("has_password")?,
     })
 }
 
@@ -270,6 +274,12 @@ impl Store {
         let store = Store { pool };
         store.seed_builtins().await?;
         Ok(store)
+    }
+
+    /// The database itself, for tests that look at what is really kept.
+    #[cfg(test)]
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
     }
 
     #[cfg(test)]
@@ -426,6 +436,46 @@ impl Store {
     /// From now on this outside account signs in as this user.
     pub async fn link_identity(&self, provider: &str, subject: &str, user_id: i64) -> Result<(), sqlx::Error> {
         sqlx::query("INSERT INTO user_identities (provider, subject, user_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING").bind(provider).bind(subject).bind(user_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// The user with this address and the hash of their password, if they have chosen one.
+    pub async fn password_user(&self, email: &str) -> Result<Option<(User, Option<String>)>, sqlx::Error> {
+        let sql = format!("SELECT {}, users.password_hash FROM users WHERE email = $1", user_columns());
+        let Some(row) = sqlx::query(&sql).bind(email).fetch_optional(&self.pool).await? else { return Ok(None) };
+        let hash: Option<String> = row.try_get("password_hash")?;
+        Ok(Some((user_row(row)?, hash)))
+    }
+
+    /// Gives the user a new password. Every session they had ends with the old one,
+    /// and the wrong guesses counted against the address are forgotten.
+    pub async fn set_password(&self, user_id: i64, password_hash: &str) -> Result<User, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let sql = format!("UPDATE users SET password_hash = $2 WHERE id = $1 RETURNING {}", user_columns());
+        let user = sqlx::query(&sql).bind(user_id).bind(password_hash).fetch_one(&mut *tx).await.and_then(user_row)?;
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM log_in_attempts WHERE email = $1").bind(&user.email).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(user)
+    }
+
+    /// Notes that a password is being tried for this address and returns the note's id, to be
+    /// forgotten if the password turns out right. None if too many wrong ones were tried lately.
+    pub async fn begin_log_in_attempt(&self, email: &str) -> Result<Option<i64>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock($1, hashtext($2))").bind(LOCK_LOG_IN).bind(email).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM log_in_attempts WHERE email = $1 AND created_at <= now() - interval '15 minutes'").bind(email).execute(&mut *tx).await?;
+        let id = sqlx::query_scalar("INSERT INTO log_in_attempts (email) SELECT $1 WHERE (SELECT count(*) FROM log_in_attempts WHERE email = $1) < $2 RETURNING id")
+            .bind(email)
+            .bind(LOG_IN_ATTEMPTS_PER_WINDOW)
+            .fetch_optional(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    pub async fn forget_log_in_attempt(&self, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM log_in_attempts WHERE id = $1").bind(id).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -752,6 +802,7 @@ impl Store {
         .execute(&mut *tx)
         .await?;
         sqlx::query("DELETE FROM sign_in_tokens WHERE email = (SELECT email FROM users WHERE id = $1)").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM log_in_attempts WHERE email = (SELECT email FROM users WHERE id = $1)").bind(user_id).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM runs WHERE user_id = $1 AND (private OR status IN ('queued', 'running'))").bind(user_id).execute(&mut *tx).await?;
         sqlx::query("UPDATE runs SET user_id = NULL WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM users WHERE id = $1").bind(user_id).execute(&mut *tx).await?;

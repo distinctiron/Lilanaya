@@ -45,6 +45,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/worlds/{id}/kpis", get(kpis))
         .route("/api/auth/email", post(account::request_link))
         .route("/api/auth/email/confirm", post(account::confirm_link))
+        .route("/api/auth/log-in", post(account::log_in))
         .route("/api/auth/sign-out", post(account::sign_out))
         .route("/api/auth/providers", get(federated::providers))
         .route("/api/auth/{provider}/start", get(federated::start))

@@ -73,6 +73,15 @@ services:
       # Who sign-in emails come from, e.g. Lilanaya <no-reply@lilanaya.example>
       - key: MAIL_FROM
         sync: false
+      # Sign-in through Google: an OAuth client of type "Web application" (Google Cloud console), with the
+      # redirect address {PUBLIC_URL}/api/auth/google/callback. Set the flag to "on" only together with both
+      # credentials: with the flag on and one of them missing the API refuses to start. Empty keeps it off.
+      - key: GOOGLE_SIGN_IN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
       # Vercel AI Gateway key: the language model and the Jev screen. Leave empty to keep compile off.
       - key: AI_GATEWAY_API_KEY
         sync: false

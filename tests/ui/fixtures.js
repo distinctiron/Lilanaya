@@ -50,10 +50,10 @@ async function nextEmail(address, seen = 0) {
 	return messages[0];
 }
 
-/** The path of the sign-in link in an email (`/log-in/confirm?token=…`). */
+/** The path of the link in an email (`/log-in/confirm?token=…`), where a password is chosen. */
 function linkIn(email) {
 	const found = email.text.match(/https?:\/\/[^/\s]+(\/log-in\/confirm\?token=[0-9a-f]+)/);
-	if (!found) throw new Error(`The email "${email.subject}" holds no sign-in link:\n${email.text}`);
+	if (!found) throw new Error(`The email "${email.subject}" holds no link:\n${email.text}`);
 	return found[1];
 }
 
@@ -67,15 +67,18 @@ async function aiCalls() {
 	}
 }
 
+/** The password of everyone the fixtures sign up. */
+export const PASSWORD = 'correct horse battery';
+
 /**
- * Signs `address` up through the API (ask for a link, read the email, confirm) in the browser context
+ * Signs `address` up through the API (ask for a link, read the email, choose `PASSWORD`) in the browser context
  * `context`, which then holds the session cookie. Returns the user as the API describes them.
  */
 async function signUpInContext(context, address) {
 	const asked = await context.request.post('/api/auth/email', { data: { email: address, intent: 'sign_up' } });
 	expect(asked.status(), await asked.text()).toBe(202);
 	const token = linkIn(await nextEmail(address)).split('token=')[1];
-	const confirmed = await context.request.post('/api/auth/email/confirm', { data: { token } });
+	const confirmed = await context.request.post('/api/auth/email/confirm', { data: { token, password: PASSWORD } });
 	expect(confirmed.status(), await confirmed.text()).toBe(200);
 	return confirmed.json();
 }

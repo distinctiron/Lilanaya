@@ -19,7 +19,9 @@ const PUBLIC_PAGES = [
 	['/runs', 'Runs'],
 	['/sign-up', 'Sign up'],
 	['/log-in', 'Log in'],
+	['/log-in/forgot', 'Forgot password'],
 	['/log-in/confirm', 'This link is not complete'],
+	['/log-in/confirm?token=0', 'Choose a password'],
 	['/profile', 'Log in first'],
 	['/no/such/page', 'Game over: page not found']
 ];

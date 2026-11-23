@@ -99,7 +99,7 @@ test('two built-in strategies can be picked and watched, and the ranking follows
 test('the way on leads a visitor to signing up, and a logged-in user straight to a new strategy', async ({ page, someone }) => {
 	await open(page, '/#your-turn');
 	await expect(page.getByRole('link', { name: 'Create your first strategy' })).toHaveAttribute('href', '/sign-up?next=%2Fstrategies%2Fnew');
-	await expect(page.locator('#your-turn')).toContainText('Sign up with your email. No password needed.');
+	await expect(page.locator('#your-turn')).toContainText('Sign up with your email.');
 	await page.getByRole('link', { name: 'How it works' }).last().click();
 	await expect(page.getByRole('heading', { level: 1 })).toHaveText('How it works');
 

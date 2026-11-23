@@ -11,7 +11,7 @@ import { profilePage } from './pages/profile.js';
 import { resultsPage } from './pages/results.js';
 import { runFormPage } from './pages/run-form.js';
 import { runsPage } from './pages/runs.js';
-import { confirmLinkPage, logInPage, signUpPage } from './pages/sign-in.js';
+import { confirmLinkPage, forgotPasswordPage, logInPage, signUpPage } from './pages/sign-in.js';
 import { strategiesPage } from './pages/strategies.js';
 import { chooseModePage, strategyEditorPage } from './pages/strategy-editor.js';
 import { worldPage } from './pages/world.js';
@@ -64,6 +64,7 @@ startRouter(
 		['/strategies/:id/edit', strategyEditorPage],
 		['/sign-up', signUpPage],
 		['/log-in', logInPage],
+		['/log-in/forgot', forgotPasswordPage],
 		['/log-in/confirm', confirmLinkPage],
 		// The old addresses, for links emailed before they changed.
 		['/sign-in', logInPage],
