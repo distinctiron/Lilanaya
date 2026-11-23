@@ -2,6 +2,7 @@ import { ApiError, getJson, postJson } from '../api.js';
 import { button, linkButton } from '../components/button.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h } from '../dom.js';
+import { aiSentence } from '../components/plan-words.js';
 import { getUser, setUser } from '../session.js';
 
 const NEXT_KEY = 'lilanaya.next';
@@ -61,10 +62,6 @@ export function logInPrompt(what) {
 
 const count = (n, one, many) => `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
 
-/** One plan's AI requests in a sentence. */
-function aiSentence(ai) {
-	return ai.per === 'world' ? `${count(ai.limit, 'AI request', 'AI requests')} per world. They never come back.` : `${count(ai.limit, 'AI request', 'AI requests')} a month, across all worlds. They come back on the 1st.`;
-}
 
 /** What an account includes and what it does not, shown before anyone signs up. Null if the numbers cannot be fetched. */
 async function planSummary() {
@@ -81,11 +78,11 @@ async function planSummary() {
 		sectionHeading('What a free account includes', { level: 2 }),
 		h('ul', { class: 'plain-list stack' }, [
 			item('Strategies written by the AI', aiSentence(free.ai_requests)),
-			item('What counts as an AI request', 'Every time you ask the AI to turn a description into rules, one is used. Asking it to rewrite a strategy uses another. Deleting a strategy does not give one back.'),
+			item('What counts as one', 'Every time you ask the AI to turn a description into rules, one is used. Asking it to write the same strategy again uses another. Deleting a strategy does not give one back.'),
 			item('Strategies you write yourself', 'No limit. Build the rules by hand or write code as often as you like.'),
 			item('Simulation runs', `${count(free.monthly_runs, 'run', 'runs')} a month, ${count(free.max_active_runs, 'run', 'runs')} at a time. The month’s runs come back on the 1st.`)
 		]),
-		h('p', { class: 'meta' }, `Subscribers get ${aiSentence(subscriber.ai_requests)} They also get ${count(subscriber.monthly_runs, 'run', 'runs')} a month.`)
+		h('p', { class: 'meta' }, [`For subscribers: ${aiSentence(subscriber.ai_requests)} They also get ${count(subscriber.monthly_runs, 'run', 'runs')} a month. `, h('a', { href: '/plans' }, 'Plans and prices')])
 	]);
 }
 
@@ -173,6 +170,7 @@ function accountPage({ signUp }) {
 		} else {
 			section.append(form);
 		}
+		if (signUp) section.append(h('p', { class: 'meta', 'data-role': 'legal-links' }, ['By signing up you accept the ', h('a', { href: '/terms' }, 'terms'), ' · How we handle your data: ', h('a', { href: '/privacy' }, 'privacy')]));
 		section.append(
 			h('p', { class: 'meta' }, signUp ? ['Already have an account? ', h('a', { href: withNext('/log-in') }, 'Log in')] : ['No account yet? ', h('a', { href: withNext('/sign-up') }, 'Sign up')])
 		);

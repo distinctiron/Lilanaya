@@ -321,8 +321,8 @@ pub async fn compile(State(state): Shared, user: User, body: Result<Bytes, Bytes
         CompileGate::Started(call) => call,
         CompileGate::AllowanceUsed => {
             let message = match limits.allowance {
-                Allowance::PerWorld(n) => format!("The free plan includes {n} AI requests per world, and you have used them all in this one. They do not come back. You can still build rules by hand or write the strategy in code, as often as you like."),
-                Allowance::PerMonth(n) => format!("Your plan includes {n} AI requests a month, and you have used them all. They come back on the 1st. You can still build rules by hand or write the strategy in code, as often as you like."),
+                Allowance::PerWorld(n) => format!("On the free plan the AI writes {n} strategies for you per world, and you have used them all in this one. They do not come back. You can still build rules by hand or write the strategy in code, as often as you like. The Plans page has more."),
+                Allowance::PerMonth(n) => format!("Your plan has the AI write {n} strategies a month for you, and you have used them all. They come back on {}. You can still build rules by hand or write the strategy in code, as often as you like. A pack on the Plans page gives you more straight away.", super::day(&state.store.usage(user.id).await?.period_end)),
             };
             return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "ai_limit_reached", message));
         }

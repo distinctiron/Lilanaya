@@ -1,9 +1,10 @@
 # The whole site, as it runs in production, for the UI tests. Started and taken down by `./test ui`.
 #
 # What is real: the nginx image, the API image (the release build, the same one Render runs), the API and the
-# worker as two services, Postgres. What stands in: the mail server (Mailpit catches every email) and the AI
+# worker as two services, Postgres. What stands in: the mail server (Mailpit catches every email), the AI
 # gateway (tests/ui/fake-ai answers for the language model and the screen, so tests cost nothing and always
-# get the same answers). The database is kept in memory and is empty at every start.
+# get the same answers) and Stripe (tests/ui/fake-stripe is its API, its Checkout page and its portal: no
+# money moves). The database is kept in memory and is empty at every start.
 #
 # To look at the site the tests see: `docker compose -f compose.test.yaml up web`, then http://localhost:3100
 # (caught emails at http://localhost:8125).
@@ -23,12 +24,22 @@ x-api: &api
     AI_GATEWAY_URL: http://ai:8090
     # Small enough that a test can reach the limit and see what the site says then.
     FREE_MONTHLY_RUNS: "3"
+    # Payment, against the stand-in for Stripe. Not a real key.
+    STRIPE_SECRET_KEY: sk_test_fake
+    STRIPE_WEBHOOK_SECRET: whsec_test
+    STRIPE_URL: http://stripe:8091
+    STRIPE_SUBSCRIPTION_PRICE: price_sub
+    STRIPE_PACK_SMALL_PRICE: price_small
+    STRIPE_PACK_MEDIUM_PRICE: price_medium
+    STRIPE_PACK_LARGE_PRICE: price_large
   depends_on:
     db:
       condition: service_healthy
     mail:
       condition: service_started
     ai:
+      condition: service_started
+    stripe:
       condition: service_started
 
 services:
@@ -57,6 +68,16 @@ services:
     command: ["node", "/fake-ai/server.mjs"]
     volumes:
       - ./tests/ui/fake-ai:/fake-ai:ro
+
+  # Stands in for Stripe: the API the site calls, and the Checkout and portal pages the browser is sent to.
+  stripe:
+    image: node:24-alpine
+    command: ["node", "/fake-stripe/server.mjs"]
+    environment:
+      WEBHOOK_SECRET: whsec_test
+      WEBHOOK_URL: http://web/api/billing/webhook
+    volumes:
+      - ./tests/ui/fake-stripe:/fake-stripe:ro
 
   api:
     <<: *api
@@ -89,6 +110,7 @@ services:
       BASE_URL: http://web
       MAIL_URL: http://mail:8025
       AI_URL: http://ai:8090
+      STRIPE_URL: http://stripe:8091
       CI: ${CI:-}
     # Chromium needs more shared memory than a container gets by default.
     ipc: host

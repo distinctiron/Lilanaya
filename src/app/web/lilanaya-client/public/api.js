@@ -45,5 +45,5 @@ export const putJson = (path, body) => request('PUT', path, body);
 /** PATCH a JSON body; rejects with ApiError on failure. */
 export const patchJson = (path, body) => request('PATCH', path, body);
 
-/** DELETE a resource; rejects with ApiError on failure. */
-export const deleteJson = (path) => request('DELETE', path);
+/** DELETE a resource, with a JSON body if one is given; rejects with ApiError on failure. */
+export const deleteJson = (path, body) => request('DELETE', path, body);

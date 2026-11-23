@@ -1,3 +1,4 @@
+import { allowanceLine, strategiesLeft } from '../components/plan-words.js';
 import { ApiError, getJson, postJson, putJson } from '../api.js';
 import { button, linkButton } from '../components/button.js';
 import { describeGuard } from '../components/machine.js';
@@ -808,22 +809,18 @@ function rulesFields(existing, { decisions, world, user, name, description, stag
 		}
 	});
 
-	// AI requests: the plan has a number per world (for good) or per month. Say how many are left before one is used.
+	// Strategies the AI writes: the plan has a number per world (for good) or per paid month, and packs add to it.
+	// Say how many are left before one is used.
 	let usage = user.usage;
-	const allowance = h('p', { class: 'meta', 'aria-live': 'polite', hidden: !canCompile, 'data-role': 'ai-requests' });
+	const allowance = h('p', { class: 'meta', 'aria-live': 'polite', hidden: !canCompile, 'data-role': 'ai-strategies' });
 	const showAllowance = () => {
-		const ai = usage?.ai_requests;
-		if (!canCompile || !ai) {
+		if (!canCompile || !usage?.ai_requests) {
 			compileButton.disabled = !canCompile;
 			return;
 		}
-		const perWorld = ai.per === 'world';
-		const left = Math.max(0, ai.limit - (perWorld ? (ai.used_by_world[world.id] ?? 0) : ai.used_this_month));
-		const scope = perWorld ? `for ${world.metadata.name}` : 'this month';
-		allowance.textContent =
-			left > 0
-				? `${left} of ${ai.limit} AI requests left ${scope} · Each press of “Turn into rules” uses one${perWorld ? ' · They never come back' : ''}`
-				: `No AI requests left ${scope}${perWorld ? ' · They do not come back' : ' · They come back on the 1st'} · You can still build the rules by hand, or write the strategy in code`;
+		const left = strategiesLeft(usage, world.id).total;
+		// When none are left, say where more can be had.
+		allowance.replaceChildren(allowanceLine(usage, world), ...(left === 0 && user.features?.billing ? [' · ', h('a', { href: '/plans' }, 'Get more')] : []));
 		compileButton.disabled = left === 0;
 	};
 	showAllowance();

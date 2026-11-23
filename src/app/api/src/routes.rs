@@ -51,7 +51,13 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/auth/{provider}/callback", get(federated::callback).post(federated::callback_form))
         .route("/api/plans", get(account::plans))
         .route("/api/session", get(account::session))
-        .route("/api/me", get(account::me).patch(account::update_me))
+        .route("/api/me", get(account::me).patch(account::update_me).delete(account::delete_me))
+        .route("/api/me/export", get(account::export))
+        .route("/api/billing", get(billing::status))
+        .route("/api/billing/checkout", post(billing::checkout))
+        .route("/api/billing/portal", post(billing::portal))
+        .route("/api/billing/confirm", post(billing::confirm))
+        .route("/api/billing/webhook", post(billing::webhook))
         .route("/api/me/entitlements", get(account::entitlements))
         .route("/api/usage", get(account::usage))
         .route("/api/strategies", get(authoring::list).post(authoring::create))
@@ -308,7 +314,7 @@ async fn create_run(State(state): Shared, user: User, body: Result<Bytes, BytesR
             return Err(ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 "run_limit_reached",
-                format!("You have used all {monthly} runs your plan gives you this month. The count starts again on the 1st."),
+                format!("You have used all {monthly} runs your plan gives you this month. The count starts again on {}. A pack on the Plans page gives you more straight away.", day(&state.store.usage(user.id).await?.period_end)),
             ))
         }
         Queued::TooManyActive => {
@@ -549,6 +555,16 @@ fn result_of(run: &RunRow) -> Result<&RunResult, ApiError> {
     run.result.as_ref().ok_or_else(|| ApiError::internal(format!("run {} is completed but has no result", run.id)))
 }
 
+/// An ISO timestamp's day as people write it: `2026-12-01T00:00:00Z` is "1 December 2026".
+pub(crate) fn day(iso: &str) -> String {
+    const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    let mut parts = iso.get(..10).unwrap_or("").split('-').map(|p| p.parse::<usize>().ok());
+    match (parts.next().flatten(), parts.next().flatten(), parts.next().flatten()) {
+        (Some(year), Some(month @ 1..=12), Some(day)) => format!("{day} {} {year}", MONTHS[month - 1]),
+        _ => iso.to_string(),
+    }
+}
+
 fn parse_json<T: DeserializeOwned>(body: Result<Bytes, BytesRejection>) -> Result<T, ApiError> {
     let bytes = body.map_err(|e| ApiError::new(e.status(), "invalid_body", e.body_text()))?;
     serde_json::from_slice(&bytes).map_err(|e| ApiError::bad_request("invalid_json", format!("The request body is not valid: {e}")))
@@ -556,6 +572,7 @@ fn parse_json<T: DeserializeOwned>(body: Result<Bytes, BytesRejection>) -> Resul
 
 mod account;
 mod authoring;
+mod billing;
 mod federated;
 
 #[cfg(test)]

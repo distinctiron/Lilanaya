@@ -10,7 +10,7 @@ Noted 2026-11-22. To be tackled one by one. Each item says what was asked, what 
 
 | Limit | Free | Subscriber | Agreed? |
 |---|---|---|---|
-| AI requests (the AI writes or rewrites rules) | 3 per world, for good | 20 per month, all worlds | Yes |
+| Strategies the AI writes (each time it writes or rewrites rules) | 3 per world, for good | 20 per paid month, all worlds | Yes |
 | Strategies built by hand or in code | No limit | No limit | Yes |
 | Simulation runs per month | 100 | 1,000 | 100 is in the PRD; 1,000 is not confirmed |
 | Runs at the same time | 2 | 2 | Not confirmed |

@@ -154,7 +154,7 @@ test('@safety the month’s runs are counted, and the form says so when they are
 
 	await open(page, '/runs/new', 'New run');
 	await page.getByRole('button', { name: 'Run simulation' }).click();
-	await expect(page.getByRole('alert').filter({ hasText: 'You have used all' })).toHaveText('You have used all 3 runs your plan gives you this month. The count starts again on the 1st.');
+	await expect(page.getByRole('alert').filter({ hasText: 'You have used all' })).toContainText(/You have used all 3 runs your plan gives you this month\. The count starts again on 1 \w+ \d{4}\. A pack on the Plans page gives you more straight away\./);
 	// Nothing was started, and the form can be used again.
 	await expect(page).toHaveURL(/\/runs\/new$/);
 	await expect(page.getByRole('button', { name: 'Run simulation' })).toBeEnabled();

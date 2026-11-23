@@ -6,7 +6,8 @@ const NAV = [
 	{ label: 'How it works', href: '/how-it-works', active: (p) => p === '/how-it-works' },
 	{ label: 'Worlds', href: '/worlds', active: (p) => p.startsWith('/worlds') },
 	{ label: 'Strategies', href: '/strategies', active: (p) => p.startsWith('/strategies') },
-	{ label: 'Runs', href: '/runs', active: (p) => p.startsWith('/runs') && p !== '/runs/new' }
+	{ label: 'Runs', href: '/runs', active: (p) => p.startsWith('/runs') && p !== '/runs/new' },
+	{ label: 'Plans', href: '/plans', active: (p) => p === '/plans' }
 ];
 
 /**

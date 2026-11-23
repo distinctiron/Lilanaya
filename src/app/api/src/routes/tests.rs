@@ -3,6 +3,8 @@
 //! Runs and previews start child processes (`isolate.rs`), as they do in the real program.
 
 use super::*;
+use crate::billing::tests::{signature, FakeStripe, TEST_WEBHOOK_SECRET};
+use crate::billing::Billing;
 use crate::config::{Allowance, Config};
 use crate::llm::tests::{completion, verdict, FakeApi};
 use crate::llm::Llm;
@@ -37,21 +39,21 @@ impl TestApp {
     }
 
     async fn with_llm(llm: Option<Llm>) -> Self {
-        Self::build(llm, OAuth::none(), Config::for_tests()).await
+        Self::build(llm, OAuth::none(), None, Config::for_tests()).await
     }
 
     async fn with_config(config: Config) -> Self {
-        Self::build(None, OAuth::none(), config).await
+        Self::build(None, OAuth::none(), None, config).await
     }
 
-    async fn build(llm: Option<Llm>, oauth: OAuth, config: Config) -> Self {
+    async fn build(llm: Option<Llm>, oauth: OAuth, billing: Option<Billing>, config: Config) -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set: run the tests with `docker compose run --rm api cargo test`");
         // The random part keeps a schema left behind by an interrupted test run from ever being picked up again.
         let schema = format!("test_{}_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::SeqCst), &crate::auth::new_token()[..8]);
         let store = Store::connect(&url, Some(&schema)).await.expect("connect to the test database");
         let mail = Arc::new(Mutex::new(Vec::new()));
-        let state = AppState::new(store.clone(), Mailer::Memory(mail.clone()), llm, oauth, config);
+        let state = AppState::new(store.clone(), Mailer::Memory(mail.clone()), llm, oauth, billing, config);
         worker::spawn(state.clone());
         let app = TestApp { router: app(state), store, schema, mail, cookie: None };
         app.signed_in_as("ada@example.com").await
@@ -107,6 +109,55 @@ impl TestApp {
         (status, headers, value)
     }
 
+    /// A message to the webhook, as Stripe sends it: the body with a `Stripe-Signature` header (or none).
+    async fn webhook_raw(&self, body: &str, signature: Option<&str>) -> (StatusCode, Value) {
+        let mut req = Request::builder().method(Method::POST).uri("/api/billing/webhook").header("content-type", "application/json");
+        if let Some(signature) = signature {
+            req = req.header("stripe-signature", signature);
+        }
+        let res = self.router.clone().oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    /// A message from Stripe, properly signed just now: event `id` of `kind` about `object`.
+    async fn stripe_says(&self, id: &str, kind: &str, object: Value) -> (StatusCode, Value) {
+        let body = json!({ "id": id, "type": kind, "data": { "object": object } }).to_string();
+        self.webhook_raw(&body, Some(&signature(TEST_WEBHOOK_SECRET, &body, unix_now()))).await
+    }
+
+    /// Presses "Subscribe" or "Buy": returns the id of the Checkout session Stripe started.
+    async fn start_checkout(&self, item: &str) -> String {
+        let (status, body) = self.post("/api/billing/checkout", json!({ "item": item, "agree": true })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["url"].as_str().unwrap().rsplit('/').next().unwrap().to_string()
+    }
+
+    async fn my_id(&self) -> i64 {
+        self.get("/api/me").await.1["id"].as_i64().unwrap()
+    }
+
+    /// Buys a pack all the way: Checkout, payment, and Stripe's message about it. `n` keeps the ids apart.
+    async fn buy_pack(&self, stripe: &FakeStripe, pack: &str, n: u32) -> String {
+        let session = self.start_checkout(pack).await;
+        stripe.pay(&session, None, Some(&format!("pi_{n}")), 599);
+        let customer = format!("cus_{}", self.my_id().await);
+        let (status, body) = self.stripe_says(&format!("evt_pack_{n}"), "checkout.session.completed", json!({ "id": session, "object": "checkout.session", "customer": customer })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        session
+    }
+
+    /// Subscribes all the way, paid from `start` to `end` (Unix seconds). The subscription at Stripe is `sub`.
+    async fn subscribe(&self, stripe: &FakeStripe, sub: &str, start: i64, end: i64) {
+        let session = self.start_checkout("subscription").await;
+        let customer = format!("cus_{}", self.my_id().await);
+        stripe.pay(&session, Some(sub), None, 899);
+        stripe.put_subscription(sub, &customer, "active", start, end, "paid");
+        let (status, body) = self.stripe_says(&format!("evt_{sub}"), "checkout.session.completed", json!({ "id": session, "object": "checkout.session", "customer": customer })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
     async fn call(&self, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Value) {
         let (status, _, value) = self.send(method, path, body).await;
         (status, value)
@@ -135,6 +186,19 @@ impl TestApp {
         }
         panic!("run {id} did not finish");
     }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+}
+
+const DAY: i64 = 24 * 60 * 60;
+
+/// The API with payment on, against a stand-in for Stripe, and optionally with the stand-in AI.
+async fn app_with_fake_stripe(llm: Option<Llm>, config: Config) -> (TestApp, FakeStripe) {
+    let stripe = FakeStripe::default();
+    let billing = stripe.billing().await;
+    (TestApp::build(llm, OAuth::none(), Some(billing), config).await, stripe)
 }
 
 fn pd(extra: Value) -> Value {
@@ -219,7 +283,7 @@ impl FakeProviders {
 async fn app_with_fake_providers() -> (TestApp, FakeProviders, String) {
     let fake = FakeProviders::default();
     let base = fake.start().await;
-    (TestApp::build(None, OAuth::for_tests(&base), Config::for_tests()).await, fake, base)
+    (TestApp::build(None, OAuth::for_tests(&base), None, Config::for_tests()).await, fake, base)
 }
 
 fn location(headers: &axum::http::HeaderMap) -> String {
@@ -283,6 +347,7 @@ async fn app_with_fake_llm() -> (TestApp, FakeApi) {
 mod access;
 mod accounts;
 mod authoring;
+mod billing;
 mod compile;
 mod contract;
 mod federated;

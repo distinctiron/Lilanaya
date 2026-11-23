@@ -102,8 +102,6 @@ pub enum CompileGate {
 
 // Advisory-lock namespaces. A limit is "count, then insert"; taking the lock first makes
 // that one step, so requests arriving together cannot all pass on the same count.
-/// True of rows made in the current calendar month (UTC).
-const THIS_MONTH: &str = "created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'";
 
 const LOCK_RUNS: i32 = 1;
 const LOCK_PREVIEWS: i32 = 2;
@@ -129,7 +127,68 @@ pub struct Store {
     pool: PgPool,
 }
 
-const USER_COLUMNS: &str = "id, email, display_name, roles, plan";
+/// True of a row of `users` whose subscription at Stripe is paid for: it is alive, and the period last
+/// paid for has not run out. The day's grace covers the hour or so Stripe takes to collect a renewal;
+/// during it the old period's allowance still applies, so it opens nothing new.
+const PAID_SUBSCRIPTION: &str = "EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.user_id = users.id AND sub.status IN ('active', 'past_due') AND sub.period_end + interval '1 day' > now())";
+
+/// The plan is worked out, not stored: a subscriber is someone whose subscription is paid for
+/// (or whose `plan` was set by hand, for accounts given away).
+fn user_columns() -> String {
+    format!("users.id, users.email, users.display_name, users.roles, CASE WHEN users.plan = 'subscriber' OR {PAID_SUBSCRIPTION} THEN 'subscriber' ELSE 'free' END AS plan")
+}
+
+/// When the allowance of user `$1` started to be counted: the start of the paid period for a paying
+/// subscriber, of the calendar month (UTC) for everyone else.
+const PERIOD_START: &str = "coalesce((SELECT sub.period_start FROM subscriptions sub WHERE sub.user_id = $1 AND sub.status IN ('active', 'past_due') AND sub.period_end + interval '1 day' > now()), date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')";
+/// When it starts again: the end of the paid period, or the first of next month.
+const PERIOD_END: &str = "coalesce((SELECT sub.period_end FROM subscriptions sub WHERE sub.user_id = $1 AND sub.status IN ('active', 'past_due') AND sub.period_end + interval '1 day' > now()), (date_trunc('month', now() AT TIME ZONE 'UTC') + interval '1 month') AT TIME ZONE 'UTC')";
+
+/// What is left of the packs user `$1` has bought: what they held, less what was taken back with a refund,
+/// less what was used. What was used never comes back, and the balance never goes below nothing.
+const PACK_STRATEGIES_LEFT: &str = "greatest(0, (SELECT coalesce(sum(strategies - refunded_strategies), 0) FROM purchases WHERE user_id = $1) - (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND from_pack AND counted))::bigint";
+const PACK_RUNS_LEFT: &str = "greatest(0, (SELECT coalesce(sum(runs - refunded_runs), 0) FROM purchases WHERE user_id = $1) - (SELECT count(*) FROM runs WHERE user_id = $1 AND from_pack))::bigint";
+
+/// AI-written strategies used in world `$2` by accounts that were since deleted under the address of user `$1`.
+/// Deleting an account and signing up again does not bring the free ones back.
+const CARRIED_OVER: &str = "(SELECT coalesce(sum(used), 0) FROM spent_free_strategies WHERE world_id = $2 AND email_hash = (SELECT encode(sha256(convert_to(email, 'UTF8')), 'hex') FROM users WHERE id = $1))::bigint";
+
+/// A user's subscription as last read from Stripe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionRow {
+    pub stripe_id: String,
+    pub status: String,
+    pub period_start: Option<String>,
+    pub period_end: Option<String>,
+    pub cancel_at_period_end: bool,
+    /// It is paid for right now: this is what makes the user a subscriber.
+    pub paid: bool,
+}
+
+/// A pack a user bought.
+#[derive(Clone, Debug)]
+pub struct PurchaseRow {
+    pub pack: String,
+    pub strategies: i64,
+    pub runs: i64,
+    pub amount: i64,
+    pub currency: String,
+    pub created_at: String,
+    pub refunded: bool,
+}
+
+/// The window a user's allowance is counted over, and what they have used in it.
+#[derive(Clone, Debug)]
+pub struct Usage {
+    /// The calendar month (`YYYY-MM`, UTC) for those counted by month.
+    pub period: String,
+    pub period_start: String,
+    pub period_end: String,
+    /// Runs started in the window on the plan's allowance.
+    pub runs_used: i64,
+    pub pack_strategies_left: i64,
+    pub pack_runs_left: i64,
+}
 
 fn user_row(row: PgRow) -> Result<User, sqlx::Error> {
     Ok(User {
@@ -138,6 +197,17 @@ fn user_row(row: PgRow) -> Result<User, sqlx::Error> {
         display_name: row.try_get("display_name")?,
         roles: row.try_get("roles")?,
         plan: row.try_get("plan")?,
+    })
+}
+
+fn subscription_row(row: PgRow) -> Result<SubscriptionRow, sqlx::Error> {
+    Ok(SubscriptionRow {
+        stripe_id: row.try_get("stripe_subscription_id")?,
+        status: row.try_get("status")?,
+        period_start: row.try_get("period_start")?,
+        period_end: row.try_get("period_end")?,
+        cancel_at_period_end: row.try_get("cancel_at_period_end")?,
+        paid: row.try_get("paid")?,
     })
 }
 
@@ -343,13 +413,13 @@ impl Store {
     }
 
     pub async fn upsert_user(&self, email: &str, default_name: &str) -> Result<User, sqlx::Error> {
-        let sql = format!("INSERT INTO users (email, display_name) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING {USER_COLUMNS}");
+        let sql = format!("INSERT INTO users (email, display_name) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING {}", user_columns());
         sqlx::query(&sql).bind(email).bind(default_name).fetch_one(&self.pool).await.and_then(user_row)
     }
 
     /// The user this outside account (say, Google account 123) signs in as, if it has signed in before.
     pub async fn identity_user(&self, provider: &str, subject: &str) -> Result<Option<User>, sqlx::Error> {
-        let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = (SELECT user_id FROM user_identities WHERE provider = $1 AND subject = $2)");
+        let sql = format!("SELECT {} FROM users WHERE id = (SELECT user_id FROM user_identities WHERE provider = $1 AND subject = $2)", user_columns());
         sqlx::query(&sql).bind(provider).bind(subject).fetch_optional(&self.pool).await?.map(user_row).transpose()
     }
 
@@ -369,7 +439,7 @@ impl Store {
     }
 
     pub async fn session_user(&self, token_hash: &str) -> Result<Option<User>, sqlx::Error> {
-        let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = (SELECT user_id FROM sessions WHERE token_hash = $1 AND expires_at > now())");
+        let sql = format!("SELECT {} FROM users WHERE id = (SELECT user_id FROM sessions WHERE token_hash = $1 AND expires_at > now())", user_columns());
         sqlx::query(&sql).bind(token_hash).fetch_optional(&self.pool).await?.map(user_row).transpose()
     }
 
@@ -379,7 +449,7 @@ impl Store {
     }
 
     pub async fn rename_user(&self, id: i64, display_name: &str) -> Result<User, sqlx::Error> {
-        let sql = format!("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING {USER_COLUMNS}");
+        let sql = format!("UPDATE users SET display_name = $2 WHERE id = $1 RETURNING {}", user_columns());
         sqlx::query(&sql).bind(id).bind(display_name).fetch_one(&self.pool).await.and_then(user_row)
     }
 
@@ -397,16 +467,26 @@ impl Store {
         Ok(())
     }
 
-    /// The current month (`YYYY-MM`, UTC) and how many runs the user has started in it.
-    pub async fn runs_this_month(&self, user_id: i64) -> Result<(String, i64), sqlx::Error> {
-        let row = sqlx::query(
+    /// The window the user's allowance is counted over, the runs used in it, and what is left of their packs.
+    pub async fn usage(&self, user_id: i64) -> Result<Usage, sqlx::Error> {
+        let row = sqlx::query(&format!(
             "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM') AS period, \
-                    (SELECT count(*) FROM runs WHERE user_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS used",
-        )
+                    to_char({PERIOD_START} AT TIME ZONE 'UTC', {TS}) AS period_start, \
+                    to_char({PERIOD_END} AT TIME ZONE 'UTC', {TS}) AS period_end, \
+                    (SELECT count(*) FROM runs WHERE user_id = $1 AND NOT from_pack AND created_at >= {PERIOD_START}) AS used, \
+                    {PACK_STRATEGIES_LEFT} AS pack_strategies, {PACK_RUNS_LEFT} AS pack_runs"
+        ))
         .bind(user_id)
         .fetch_one(&self.pool)
         .await?;
-        Ok((row.try_get("period")?, row.try_get("used")?))
+        Ok(Usage {
+            period: row.try_get("period")?,
+            period_start: row.try_get("period_start")?,
+            period_end: row.try_get("period_end")?,
+            runs_used: row.try_get("used")?,
+            pack_strategies_left: row.try_get("pack_strategies")?,
+            pack_runs_left: row.try_get("pack_runs")?,
+        })
     }
 
     /// Notes one strategy check (a preview or a save), unless the user has reached the hourly limit (then false).
@@ -437,8 +517,9 @@ impl Store {
                     (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND blocked AND created_at > now() - interval '24 hours') AS blocked, \
                     (SELECT count(*) FROM llm_calls WHERE {today}) AS day, \
                     (SELECT coalesce(sum(input_tokens + output_tokens), 0)::bigint FROM llm_calls WHERE {today}) AS tokens, \
-                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND world_id = $2) AS world, \
-                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND {THIS_MONTH}) AS month"
+                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND NOT from_pack AND world_id = $2) + {CARRIED_OVER} AS world, \
+                    (SELECT count(*) FROM llm_calls WHERE user_id = $1 AND counted AND NOT from_pack AND created_at >= {PERIOD_START}) AS month, \
+                    {PACK_STRATEGIES_LEFT} AS pack"
         ))
         .bind(user_id)
         .bind(world_id)
@@ -453,7 +534,9 @@ impl Store {
             Allowance::PerWorld(n) => count("world")? >= n,
             Allowance::PerMonth(n) => count("month")? >= n,
         };
-        if used_up {
+        // When the plan's own are used up, a pack pays, if the user has one with anything left.
+        let from_pack = used_up && count("pack")? > 0;
+        if used_up && !from_pack {
             return Ok(CompileGate::AllowanceUsed);
         }
         if count("hour")? >= limits.per_hour {
@@ -462,7 +545,7 @@ impl Store {
         if count("day")? >= limits.per_day || count("tokens")? >= limits.tokens_per_day {
             return Ok(CompileGate::DailyCeiling);
         }
-        let id: i64 = sqlx::query("INSERT INTO llm_calls (user_id, world_id) VALUES ($1, $2) RETURNING id").bind(user_id).bind(world_id).fetch_one(&mut *tx).await?.try_get("id")?;
+        let id: i64 = sqlx::query("INSERT INTO llm_calls (user_id, world_id, from_pack) VALUES ($1, $2, $3) RETURNING id").bind(user_id).bind(world_id).bind(from_pack).fetch_one(&mut *tx).await?.try_get("id")?;
         tx.commit().await?;
         Ok(CompileGate::Started(id))
     }
@@ -484,10 +567,11 @@ impl Store {
         Ok(())
     }
 
-    /// AI requests the user has used: in each world for good, and this month across all worlds.
+    /// Strategies the AI has written for the user on the plan's own allowance (those a pack paid for are
+    /// left out): in each world for good, and in the current period across all worlds.
     pub async fn ai_requests_used(&self, user_id: i64) -> Result<(std::collections::BTreeMap<String, i64>, i64), sqlx::Error> {
         let rows = sqlx::query(&format!(
-            "SELECT world_id, count(*) AS used, count(*) FILTER (WHERE {THIS_MONTH}) AS month FROM llm_calls WHERE user_id = $1 AND counted GROUP BY world_id"
+            "SELECT world_id, count(*) AS used, count(*) FILTER (WHERE created_at >= {PERIOD_START}) AS month FROM llm_calls WHERE user_id = $1 AND counted AND NOT from_pack GROUP BY world_id"
         ))
         .bind(user_id)
         .fetch_all(&self.pool)
@@ -500,7 +584,178 @@ impl Store {
                 by_world.insert(world, row.try_get::<i64, _>("used")?);
             }
         }
+        // What an earlier, deleted account under the same address had used.
+        let carried = sqlx::query("SELECT world_id, used FROM spent_free_strategies WHERE email_hash = (SELECT encode(sha256(convert_to(email, 'UTF8')), 'hex') FROM users WHERE id = $1)").bind(user_id).fetch_all(&self.pool).await?;
+        for row in carried {
+            *by_world.entry(row.try_get("world_id")?).or_insert(0) += row.try_get::<i64, _>("used")?;
+        }
         Ok((by_world, month))
+    }
+
+    // --- payment ---
+
+    /// The user's customer record at Stripe, if they have one.
+    pub async fn customer(&self, user_id: i64) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar("SELECT stripe_customer_id FROM users WHERE id = $1").bind(user_id).fetch_optional(&self.pool).await.map(Option::flatten)
+    }
+
+    /// Notes the customer record made for a user, unless they have one already; returns the one that stands.
+    pub async fn keep_customer(&self, user_id: i64, customer: &str) -> Result<String, sqlx::Error> {
+        sqlx::query_scalar("UPDATE users SET stripe_customer_id = coalesce(stripe_customer_id, $2) WHERE id = $1 RETURNING stripe_customer_id").bind(user_id).bind(customer).fetch_one(&self.pool).await
+    }
+
+    /// Whose customer record this is.
+    pub async fn customer_user(&self, customer: &str) -> Result<Option<i64>, sqlx::Error> {
+        sqlx::query_scalar("SELECT id FROM users WHERE stripe_customer_id = $1").bind(customer).fetch_optional(&self.pool).await
+    }
+
+    /// The user agreed to the terms, and to the service starting at once, on their way to pay.
+    pub async fn accept_terms(&self, user_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET terms_accepted_at = now() WHERE id = $1").bind(user_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Stores a subscription as Stripe has it. The paid period moves only when `sub.paid`: a renewal
+    /// Stripe has not collected yet opens nothing. A user has one subscription; another one takes its
+    /// place only when the one we know has ended, so a late message about an old one changes nothing.
+    pub async fn save_subscription(&self, user_id: i64, sub: &crate::billing::Subscription) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO subscriptions AS s (user_id, stripe_subscription_id, status, period_start, period_end, cancel_at_period_end) \
+             VALUES ($1, $2, $3, CASE WHEN $7 THEN to_timestamp($4) END, CASE WHEN $7 THEN to_timestamp($5) END, $6) \
+             ON CONFLICT (user_id) DO UPDATE SET \
+                 stripe_subscription_id = EXCLUDED.stripe_subscription_id, status = EXCLUDED.status, cancel_at_period_end = EXCLUDED.cancel_at_period_end, updated_at = now(), \
+                 period_start = CASE WHEN $7 THEN EXCLUDED.period_start WHEN s.stripe_subscription_id = EXCLUDED.stripe_subscription_id THEN s.period_start END, \
+                 period_end = CASE WHEN $7 THEN EXCLUDED.period_end WHEN s.stripe_subscription_id = EXCLUDED.stripe_subscription_id THEN s.period_end END \
+             WHERE s.stripe_subscription_id = EXCLUDED.stripe_subscription_id OR s.status NOT IN ('active', 'past_due', 'trialing', 'incomplete')",
+        )
+        .bind(user_id)
+        .bind(&sub.id)
+        .bind(&sub.status)
+        .bind(sub.period_start as f64)
+        .bind(sub.period_end as f64)
+        .bind(sub.cancel_at_period_end)
+        .bind(sub.paid)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn subscription(&self, user_id: i64) -> Result<Option<SubscriptionRow>, sqlx::Error> {
+        let sql = format!(
+            "SELECT stripe_subscription_id, status, cancel_at_period_end, \
+                    to_char(period_start AT TIME ZONE 'UTC', {TS}) AS period_start, to_char(period_end AT TIME ZONE 'UTC', {TS}) AS period_end, \
+                    (status IN ('active', 'past_due') AND period_end + interval '1 day' > now()) IS TRUE AS paid \
+             FROM subscriptions WHERE user_id = $1"
+        );
+        sqlx::query(&sql).bind(user_id).fetch_optional(&self.pool).await?.map(subscription_row).transpose()
+    }
+
+    /// Notes a pack that was paid for. False if this payment was noted before (nothing is added twice).
+    pub async fn record_purchase(&self, user_id: i64, pack: &crate::billing::Pack, session: &crate::billing::Session) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
+            "INSERT INTO purchases (user_id, pack, strategies, runs, amount, currency, stripe_session_id, stripe_payment_intent) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (stripe_session_id) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(pack.id)
+        .bind(pack.strategies)
+        .bind(pack.runs)
+        .bind(session.amount)
+        .bind(&session.currency)
+        .bind(&session.id)
+        .bind(&session.payment_intent)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() == 1)
+    }
+
+    /// Money was paid back for a pack (or the payment was disputed): `share` of the price, from 0 to 1, in all.
+    /// The same share of the pack is taken back, rounded up. Told twice, it is taken once; a later, larger
+    /// refund takes the difference. False if we know of no such payment.
+    pub async fn refund_purchase(&self, payment_intent: &str, share: f64) -> Result<bool, sqlx::Error> {
+        let done = sqlx::query(
+            "UPDATE purchases SET refunded_at = coalesce(refunded_at, now()), \
+                 refunded_strategies = greatest(refunded_strategies, least(strategies, ceil(strategies * $2)::bigint)), \
+                 refunded_runs = greatest(refunded_runs, least(runs, ceil(runs * $2)::bigint)) \
+             WHERE stripe_payment_intent = $1",
+        )
+        .bind(payment_intent)
+        .bind(share.clamp(0.0, 1.0))
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// The packs a user has bought, newest first.
+    pub async fn purchases(&self, user_id: i64) -> Result<Vec<PurchaseRow>, sqlx::Error> {
+        let sql = format!("SELECT pack, strategies, runs, amount, currency, to_char(created_at AT TIME ZONE 'UTC', {TS}) AS created_at, (refunded_strategies >= strategies AND refunded_runs >= runs AND refunded_at IS NOT NULL) AS refunded FROM purchases WHERE user_id = $1 ORDER BY id DESC");
+        let rows = sqlx::query(&sql).bind(user_id).fetch_all(&self.pool).await?;
+        rows.into_iter()
+            .map(|r| {
+                Ok(PurchaseRow {
+                    pack: r.try_get("pack")?,
+                    strategies: r.try_get("strategies")?,
+                    runs: r.try_get("runs")?,
+                    amount: r.try_get("amount")?,
+                    currency: r.try_get("currency")?,
+                    created_at: r.try_get("created_at")?,
+                    refunded: r.try_get("refunded")?,
+                })
+            })
+            .collect()
+    }
+
+    /// Whether this message from Stripe has been acted on before.
+    pub async fn event_seen(&self, id: &str) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM stripe_events WHERE id = $1)").bind(id).fetch_one(&self.pool).await
+    }
+
+    pub async fn record_event(&self, id: &str, kind: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO stripe_events (id, kind) VALUES ($1, $2) ON CONFLICT DO NOTHING").bind(id).bind(kind).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Moves a user's paid period (and when it was read) into the past, so a test can stand after its end.
+    #[cfg(test)]
+    pub async fn age_subscription(&self, user_id: i64, interval: &str) {
+        sqlx::query(&format!("UPDATE subscriptions SET period_start = period_start - interval '{interval}', period_end = period_end - interval '{interval}' WHERE user_id = $1")).bind(user_id).execute(&self.pool).await.unwrap();
+    }
+
+    // --- leaving ---
+
+    /// Everything we hold about a user, for them to take away.
+    pub async fn export_user(&self, user_id: i64) -> Result<Value, sqlx::Error> {
+        let one = |sql: &'static str| async move { sqlx::query_scalar::<_, Option<Value>>(sql).bind(user_id).fetch_one(&self.pool).await.map(|v| v.unwrap_or(Value::Null)) };
+        Ok(json!({
+            "account": one("SELECT (SELECT to_jsonb(u) FROM (SELECT id, email, display_name, roles, plan, created_at, terms_accepted_at, stripe_customer_id FROM users WHERE id = $1) u)").await?,
+            "sign_in_providers": one("SELECT coalesce(jsonb_agg(to_jsonb(i)), '[]') FROM (SELECT provider, created_at FROM user_identities WHERE user_id = $1 ORDER BY created_at) i").await?,
+            "strategies": one("SELECT coalesce(jsonb_agg(to_jsonb(s)), '[]') FROM (SELECT id, visibility, mode, world_id, prompt, doc, created_at, updated_at FROM strategies WHERE owner_id = $1 ORDER BY created_at) s").await?,
+            "runs": one("SELECT coalesce(jsonb_agg(to_jsonb(r)), '[]') FROM (SELECT id, world_id, status, seed, iterations, actor_count, private, from_pack, created_at, finished_at, result FROM runs WHERE user_id = $1 ORDER BY id) r").await?,
+            "ai_written_strategies": one("SELECT coalesce(jsonb_agg(to_jsonb(c)), '[]') FROM (SELECT created_at, world_id, counted, from_pack, verdict FROM llm_calls WHERE user_id = $1 ORDER BY id) c").await?,
+            "subscription": one("SELECT (SELECT to_jsonb(s) FROM (SELECT status, period_start, period_end, cancel_at_period_end FROM subscriptions WHERE user_id = $1) s)").await?,
+            "purchases": one("SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]') FROM (SELECT pack, strategies, runs, amount, currency, created_at, refunded_strategies, refunded_runs, refunded_at FROM purchases WHERE user_id = $1 ORDER BY id) p").await?,
+        }))
+    }
+
+    /// Deletes a user and what is theirs: the account, sessions, strategies, private runs, what they
+    /// bought. Public runs stay, as part of their world's history, with nobody's name on them. What
+    /// they had used of the free AI-written strategies is kept under a hash of the address.
+    pub async fn delete_user(&self, user_id: i64) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO spent_free_strategies (email_hash, world_id, used) \
+             SELECT encode(sha256(convert_to(u.email, 'UTF8')), 'hex'), c.world_id, count(*) FROM llm_calls c JOIN users u ON u.id = c.user_id \
+             WHERE c.user_id = $1 AND c.counted AND NOT c.from_pack AND c.world_id IS NOT NULL GROUP BY u.email, c.world_id \
+             ON CONFLICT (email_hash, world_id) DO UPDATE SET used = spent_free_strategies.used + EXCLUDED.used",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("DELETE FROM sign_in_tokens WHERE email = (SELECT email FROM users WHERE id = $1)").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM runs WHERE user_id = $1 AND (private OR status IN ('queued', 'running'))").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("UPDATE runs SET user_id = NULL WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM users WHERE id = $1").bind(user_id).execute(&mut *tx).await?;
+        tx.commit().await
     }
 
     // --- runs ---
@@ -510,22 +765,26 @@ impl Store {
     pub async fn enqueue(&self, input: &RunInput, user_id: i64, private: bool, monthly_limit: i64, active_limit: i64) -> Result<Queued, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(TAKE_LOCK).bind(LOCK_RUNS).bind(user_id as i32).execute(&mut *tx).await?;
-        let row = sqlx::query(
-            "SELECT (SELECT count(*) FROM runs WHERE user_id = $1 AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS month, \
-                    (SELECT count(*) FROM runs WHERE user_id = $1 AND status IN ('queued', 'running')) AS active",
-        )
+        let row = sqlx::query(&format!(
+            "SELECT (SELECT count(*) FROM runs WHERE user_id = $1 AND NOT from_pack AND created_at >= {PERIOD_START}) AS month, \
+                    (SELECT count(*) FROM runs WHERE user_id = $1 AND status IN ('queued', 'running')) AS active, \
+                    {PACK_RUNS_LEFT} AS pack"
+        ))
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
-        if row.try_get::<i64, _>("month")? >= monthly_limit {
+        // When the plan's own runs are used up, a pack pays, if the user has one with anything left.
+        let used_up = row.try_get::<i64, _>("month")? >= monthly_limit;
+        let from_pack = used_up && row.try_get::<i64, _>("pack")? > 0;
+        if used_up && !from_pack {
             return Ok(Queued::MonthlyLimit);
         }
         if row.try_get::<i64, _>("active")? >= active_limit {
             return Ok(Queued::TooManyActive);
         }
         let sql = format!(
-            "INSERT INTO runs (world_id, world_name, seed, iterations, actor_count, input, user_id, private) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {}",
+            "INSERT INTO runs (world_id, world_name, seed, iterations, actor_count, input, user_id, private, from_pack) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {}",
             run_columns()
         );
         let row = sqlx::query(&sql)
@@ -537,6 +796,7 @@ impl Store {
             .bind(Json(input))
             .bind(user_id)
             .bind(private)
+            .bind(from_pack)
             .fetch_one(&mut *tx)
             .await?;
         tx.commit().await?;

@@ -5,6 +5,8 @@ import { sectionHeading } from './components/section-heading.js';
 import { h } from './dom.js';
 import { howItWorksPage } from './pages/how-it-works.js';
 import { landingPage } from './pages/landing.js';
+import { privacyPage, refundsPage, termsPage } from './pages/legal.js';
+import { plansPage } from './pages/plans.js';
 import { profilePage } from './pages/profile.js';
 import { resultsPage } from './pages/results.js';
 import { runFormPage } from './pages/run-form.js';
@@ -67,6 +69,10 @@ startRouter(
 		['/sign-in', logInPage],
 		['/sign-in/confirm', confirmLinkPage],
 		['/profile', profilePage],
+		['/plans', plansPage],
+		['/terms', termsPage],
+		['/privacy', privacyPage],
+		['/refunds', refundsPage],
 		['/runs', runsPage],
 		['/runs/new', runFormPage],
 		['/runs/:id', resultsPage]

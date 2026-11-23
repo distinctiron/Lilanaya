@@ -93,10 +93,14 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 
 - [ ] World creator (1.3, 1.5, 1.6, 1.8, 1.9).
 - [ ] Quick test (2.5), replays and subscriber gating (4.4, 4.5, pairwise filters), limits (3.5).
-- [ ] Billing, usage packs, enforced quotas with rollover (5.2 full, 5.3, 5.4), webhooks (5.7), artifact access audit (5.6).
+- [x] Payment through Stripe (user, 2026-11-23): a monthly subscription and three usage packs (10 strategies + 100 runs, 20 + 200, 50 + 500), bought on Stripe's Checkout page and managed in its portal; signed webhooks, acted on once (5.2 full, 5.3, 5.7 in part). A subscriber's allowance is counted per paid period and opens only when the invoice is paid. Terms, privacy and refund pages (drafts), data download and account deletion. Verified against a stand-in for Stripe only: no real Stripe account has been tried yet (needs test-mode keys and the prices).
+- [ ] Not built, by choice: rollover of unused runs (5.4), packs for actors, world seeds and private worlds (5.3; they wait for the world creator), a nightly reconciliation job and dead-letter queue (5.7; Stripe retries for three days and state is read from Stripe, not from the message), artifact access audit (5.6).
 - [ ] Strategy versioning and public strategy pages (2.7, 2.8).
 
 ## Decided
+
+- Payment: Stripe. Prices in euros, VAT added on top by Stripe Tax: subscription €8.99 a month; packs €5.99, €9.99, €21.99. The amounts are set in Stripe (user, 2026-11-23).
+- The site says "strategies", not "AI requests" (user, 2026-11-23).
 
 - Artifacts go to S3-compatible object storage (user, 2026-11-18). Superseded 2026-11-22: no object storage; a run's files are built on request from Postgres (see `security-audit.md`, Decisions).
 - Accounts come before authoring (user, 2026-11-18).
@@ -106,5 +110,6 @@ Order follows `stories/milestones-and-priorities.md`, with accounts first (user,
 ## Open decisions (ask, do not assume)
 
 - App credentials for Google, Apple, Facebook and GitHub sign-in (the code is in place and waits for them), and the SMTP service for sign-in emails in production.
-- Payment provider for subscriptions (needed for the billing item).
+- The seller's details (company name, CVR, address, contact address) in `pages/legal.js`, and a lawyer's reading of the three legal pages, before money is taken.
+- Measured AI cost per strategy. Prices were set on the highest a strategy can cost (about $0.32: two model calls of 6,000 output tokens), not on measurement.
 - Whether the embedded JavaScript interpreter is isolation enough for public launch, or code strategies must move to a separate process or WebAssembly first.

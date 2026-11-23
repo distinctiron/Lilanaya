@@ -1,5 +1,6 @@
 mod artifacts;
 mod auth;
+mod billing;
 mod config;
 mod error;
 mod guard;
@@ -97,7 +98,13 @@ async fn serve() {
     }
     let llm = llm::Llm::from_env().unwrap_or_else(|e| panic!("{e}"));
     let oauth = oauth::OAuth::from_env().unwrap_or_else(|e| panic!("{e}"));
+    // Only the part that answers requests takes payment.
+    let billing = if serves_requests { billing::Billing::from_env().unwrap_or_else(|e| panic!("{e}")) } else { None };
     if serves_requests {
+        match &billing {
+            Some(billing) => println!("{}", billing.describe()),
+            None => println!("STRIPE_SECRET_KEY is not set (see src/app/api/src/billing.rs): payment is switched off, nothing is for sale"),
+        }
         match &llm {
             Some(llm) => println!("plain-English strategy compile uses {}", llm.describe()),
             None => println!("AI_GATEWAY_API_KEY is not set (see src/app/api/src/llm.rs): plain-English strategy compile is switched off"),
@@ -106,7 +113,7 @@ async fn serve() {
     }
 
     let store = connect(&database_url).await;
-    let state = worker::AppState::new(store, mailer, llm, oauth, config);
+    let state = worker::AppState::new(store, mailer, llm, oauth, billing, config);
     let worker = if runs_worker {
         // Only the worker puts interrupted runs back: when the two are separate, a restart
         // of the API must not re-queue a run the worker is in the middle of.

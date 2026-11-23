@@ -193,6 +193,15 @@ main {
 	min-width: 0;
 }
 
+/* The packs on the plans page: three side by side where there is room. */
+.columns.pack-list {
+	gap: 24px;
+}
+
+.columns.pack-list > * {
+	flex-basis: 240px;
+}
+
 .columns > .high-scores {
 	flex-basis: 480px;
 }

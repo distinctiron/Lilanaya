@@ -1,6 +1,7 @@
 //! The background worker: takes queued runs one at a time, executes each in a
 //! child process it can stop (`isolate.rs`) and stores the outcome.
 
+use crate::billing::Billing;
 use crate::config::Config;
 use crate::isolate::{self, Failure};
 use crate::llm::Llm;
@@ -18,6 +19,8 @@ pub struct AppState {
     pub llm: Option<Llm>,
     /// Sign-in through Google, Apple, Facebook and GitHub; only the ones with credentials.
     pub oauth: OAuth,
+    /// Payment through Stripe; `None` switches it off (nothing is for sale).
+    pub billing: Option<Billing>,
     pub config: Config,
     /// Poked whenever a run is queued, so the worker starts at once.
     pub wake: Notify,
@@ -30,8 +33,8 @@ pub struct AppState {
 const SANDBOX_SLOTS: usize = 4;
 
 impl AppState {
-    pub fn new(store: Store, mailer: Mailer, llm: Option<Llm>, oauth: OAuth, config: Config) -> Arc<Self> {
-        Arc::new(AppState { store, mailer, llm, oauth, config, wake: Notify::new(), sandbox: Semaphore::new(SANDBOX_SLOTS) })
+    pub fn new(store: Store, mailer: Mailer, llm: Option<Llm>, oauth: OAuth, billing: Option<Billing>, config: Config) -> Arc<Self> {
+        Arc::new(AppState { store, mailer, llm, oauth, billing, config, wake: Notify::new(), sandbox: Semaphore::new(SANDBOX_SLOTS) })
     }
 }
 

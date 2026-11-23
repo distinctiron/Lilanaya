@@ -76,6 +76,19 @@ services:
       # Vercel AI Gateway key: the language model and the Jev screen. Leave empty to keep compile off.
       - key: AI_GATEWAY_API_KEY
         sync: false
+      # Payment through Stripe (see .env.example for what to make in Stripe). Leave the key empty to keep payment off.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_SUBSCRIPTION_PRICE
+        sync: false
+      - key: STRIPE_PACK_SMALL_PRICE
+        sync: false
+      - key: STRIPE_PACK_MEDIUM_PRICE
+        sync: false
+      - key: STRIPE_PACK_LARGE_PRICE
+        sync: false
 
   # The worker: runs queued simulations, one at a time, each in a child process it can stop.
   - type: worker

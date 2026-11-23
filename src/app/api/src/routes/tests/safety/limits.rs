@@ -84,7 +84,7 @@ async fn strategy_checks_are_limited_per_hour() {
 #[tokio::test]
 async fn a_free_plan_has_three_ai_requests_per_world_for_good() {
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
     let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
     let ai = |usage: Value| usage["ai_requests"].clone();
     assert_eq!(ai(app.get("/api/usage").await.1), json!({ "limit": 3, "per": "world", "used_by_world": {}, "used_this_month": 0 }));
@@ -135,7 +135,7 @@ async fn a_free_plan_has_three_ai_requests_per_world_for_good() {
 #[tokio::test]
 async fn a_subscriber_has_twenty_ai_requests_a_month_across_worlds() {
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, subscriber_ai_requests_per_month: 4, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, subscriber_ai_requests_per_month: 4, ..Config::for_tests() }).await;
     let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
     let me = app.get("/api/me").await.1["id"].as_i64().unwrap();
     app.store.set_plan(me, "subscriber").await.unwrap();
@@ -146,7 +146,7 @@ async fn a_subscriber_has_twenty_ai_requests_a_month_across_worlds() {
     assert_eq!(app.get("/api/usage").await.1["ai_requests"], json!({ "limit": 4, "per": "month", "used_by_world": { "prisoners-dilemma": 4 }, "used_this_month": 4 }));
     let (status, body) = app.post("/api/strategies/compile", prompt.clone()).await;
     assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("ai_limit_reached")), "{body}");
-    assert!(body["error"]["message"].as_str().unwrap().contains("on the 1st"), "{body}");
+    assert!(body["error"]["message"].as_str().unwrap().contains("They come back on 1 "), "{body}");
     // The month's number covers every world.
     let limits = CompileLimits { per_hour: 50, blocked_per_day: 5, per_day: 500, tokens_per_day: 2_000_000, allowance: Allowance::PerMonth(4) };
     assert_eq!(app.store.begin_llm_call(me, "another-world", limits).await.unwrap(), CompileGate::AllowanceUsed);
@@ -157,7 +157,7 @@ async fn a_subscriber_has_twenty_ai_requests_a_month_across_worlds() {
 #[tokio::test]
 async fn ai_requests_arriving_together_do_not_get_past_the_allowance() {
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
     for _ in 0..8 {
         api.say(GRIM_JSON);
     }
@@ -184,7 +184,7 @@ async fn compile_closes_for_everyone_when_the_day_s_ceiling_is_reached() {
 
     // By number of compiles: two a day, whoever asks.
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_day: 2, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_day: 2, ..Config::for_tests() }).await;
     let bob = app.signed_in_as("bob@example.com").await;
     api.say(GRIM_JSON).say(GRIM_JSON);
     assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.0, StatusCode::OK);
@@ -196,7 +196,7 @@ async fn compile_closes_for_everyone_when_the_day_s_ceiling_is_reached() {
 
     // By tokens: the stand-in's screen uses 320 and its model 1,000 a call.
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compile_tokens_per_day: 1_000, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compile_tokens_per_day: 1_000, ..Config::for_tests() }).await;
     api.say(GRIM_JSON);
     assert_eq!(app.post("/api/strategies/compile", prompt.clone()).await.0, StatusCode::OK);
     closed(app.post("/api/strategies/compile", prompt.clone()).await);
@@ -257,7 +257,7 @@ async fn the_hourly_and_quarter_hourly_limits_lift_when_their_time_has_passed() 
 #[tokio::test]
 async fn free_ai_requests_never_come_back_and_a_subscriber_s_come_back_each_month() {
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, free_ai_requests_per_world: 2, subscriber_ai_requests_per_month: 2, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, free_ai_requests_per_world: 2, subscriber_ai_requests_per_month: 2, ..Config::for_tests() }).await;
     let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
     let code = |(_, body): (StatusCode, Value)| body["error"]["code"].as_str().map(str::to_string);
 
@@ -278,7 +278,7 @@ async fn free_ai_requests_never_come_back_and_a_subscriber_s_come_back_each_mont
     assert_eq!(code(app.post("/api/strategies/compile", prompt.clone()).await), None);
     let (status, body) = app.post("/api/strategies/compile", prompt.clone()).await;
     assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("ai_limit_reached")), "{body}");
-    assert!(body["error"]["message"].as_str().unwrap().contains("come back on the 1st"), "{body}");
+    assert!(body["error"]["message"].as_str().unwrap().contains("They come back on 1 "), "{body}");
     app.store.backdate("llm_calls", "32 days").await;
     api.say(GRIM_JSON);
     assert_eq!(code(app.post("/api/strategies/compile", prompt.clone()).await), None, "a new month");
@@ -289,7 +289,7 @@ async fn free_ai_requests_never_come_back_and_a_subscriber_s_come_back_each_mont
 #[tokio::test]
 async fn the_day_s_ceiling_and_a_suspension_lift_the_next_day() {
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, compiles_per_day: 2, free_ai_requests_per_world: 50, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, compiles_per_day: 2, free_ai_requests_per_world: 50, ..Config::for_tests() }).await;
     let prompt = json!({ "prompt": "Cooperate until betrayed, then defect for ever." });
     let bob = app.signed_in_as("bob@example.com").await;
 
@@ -309,7 +309,7 @@ async fn the_day_s_ceiling_and_a_suspension_lift_the_next_day() {
 
     // Five descriptions turned down close compile to that user for 24 hours.
     let api = FakeApi::default();
-    let app = TestApp::build(Some(api.llm().await), OAuth::none(), Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
+    let app = TestApp::build(Some(api.llm().await), OAuth::none(), None, Config { compiles_per_hour: 50, ..Config::for_tests() }).await;
     let bob = app.signed_in_as("bob@example.com").await;
     for _ in 0..5 {
         api.judge(200, verdict("abusive_or_harmful", 0.01));
@@ -336,6 +336,7 @@ async fn every_limit_is_read_from_the_settings_and_shown_to_the_user() {
         json!({
             "free": { "ai_requests": { "limit": 4, "per": "world" }, "monthly_runs": 7, "max_active_runs": 3 },
             "subscriber": { "ai_requests": { "limit": 40, "per": "month" }, "monthly_runs": 70, "max_active_runs": 3 },
+            "billing": null,
         })
     );
     let (_, usage) = app.get("/api/usage").await;

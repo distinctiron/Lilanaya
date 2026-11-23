@@ -77,7 +77,12 @@ All routes are under `/api` and return JSON. Errors look like `{"error": {"code"
 | `GET /api/worlds`, `GET /api/worlds/{id}` | World templates |
 | `POST /api/worlds/validate` | Checks a world document: `{"valid", "errors": [{path, message}]}` |
 | `POST /api/auth/email`, `POST /api/auth/email/confirm`, `POST /api/auth/sign-out` | Email a one-time link (`intent`: `sign_up` makes the account if there is none, `log_in` never does and says so in the email); trade its token for a session cookie; end the session |
-| `GET /api/plans` | What each plan includes (AI requests, runs), for the sign-up page. Public |
+| `GET /api/plans` | What each plan includes (strategies the AI writes, runs) and, with payment on, what the subscription and the packs cost. Public |
+| `GET /api/billing` | What the signed-in user pays for: subscription, what is left of their packs, what they bought |
+| `POST /api/billing/checkout`, `POST /api/billing/portal` | Start Stripe's Checkout page (`{"item": "subscription" \| "small" \| "medium" \| "large", "agree": true}`) or its customer portal; both answer `{"url"}` |
+| `POST /api/billing/confirm` | Back from Stripe with a session's id: reads the session from Stripe and stores what was paid |
+| `POST /api/billing/webhook` | Stripe's messages; signature checked, acted on once |
+| `GET /api/me/export`, `DELETE /api/me` | A file of everything held about the user; delete the account (`{"email"}` to confirm) |
 | `GET /api/session` | `{"user": …}` for the signed-in user, `{"user": null}` otherwise |
 | `GET /api/me`, `PATCH /api/me`, `GET /api/me/entitlements`, `GET /api/usage` | Profile, display name, plan flags, runs used this month (401 when signed out) |
 | `GET /api/strategies`, `GET /api/strategies/{id}` | Built-in, public and own strategies: rules (state machines as data) or code |

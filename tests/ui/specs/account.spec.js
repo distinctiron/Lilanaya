@@ -5,10 +5,12 @@ test('signing up: what an account includes, the emailed link, and the first look
 	await open(page, '/sign-up', 'Sign up');
 	// The limits are told before anyone signs up, with this server's numbers.
 	const plan = page.locator('[data-role="plan-summary"]');
-	await expect(plan).toContainText('3 AI requests per world. They never come back.');
+	await expect(plan).toContainText('The AI writes 3 strategies for you in each world. They never come back.');
 	await expect(plan).toContainText('Deleting a strategy does not give one back.');
 	await expect(plan).toContainText('3 runs a month, 2 runs at a time.');
-	await expect(plan).toContainText('Subscribers get 20 AI requests a month, across all worlds.');
+	await expect(plan).toContainText('For subscribers: The AI writes 20 strategies a month for you, across all worlds.');
+	await expect(plan.getByRole('link', { name: 'Plans and prices' })).toHaveAttribute('href', '/plans');
+	await expect(page.locator('[data-role="legal-links"]').getByRole('link', { name: 'terms' })).toHaveAttribute('href', '/terms');
 
 	await page.getByLabel('Email address').fill(`  ${address.toUpperCase()} `);
 	await page.getByRole('button', { name: 'Sign up' }).click();
@@ -34,7 +36,9 @@ test('signing up: what an account includes, the emailed link, and the first look
 	await expect(main).toContainText('2 runs at a time');
 	await expect(main).toContainText('3 per world · They never come back');
 	await expect(main).toContainText('None used yet');
-	await expect(main).toContainText('Private worlds · Subscribers only');
+	await expect(main.locator('[data-role="plan-status"]')).toHaveText('Free');
+	// Nothing is promised that is not built.
+	await expect(main).not.toContainText('Private worlds');
 	// The header now shows who is logged in instead of the way in.
 	const name = address.split('@')[0];
 	await expect(page.getByRole('link', { name: `Profile of ${name}` })).toBeVisible();
@@ -177,19 +181,18 @@ test('a logged-in user who opens the sign-up page is sent on', async ({ page, ac
 });
 
 test('a subscriber sees a monthly allowance that comes back', async ({ page, account }) => {
-	// Nobody can become a subscriber through the site yet (plans are set by hand), so the answer is stood in for.
+	// The answer is stood in for, to show a month that is partly used. Becoming a subscriber for real is in billing.spec.js.
 	const subscriber = {
 		...account.user,
 		plan: 'subscriber',
 		entitlements: { plan: 'subscriber', analytics_access: true, quick_test_access: true, private_worlds: true },
-		usage: { ...account.user.usage, monthly_runs: 1000, used: 12, remaining: 988, ai_requests: { limit: 20, per: 'month', used_by_world: { 'prisoners-dilemma': 5 }, used_this_month: 5 } }
+		usage: { ...account.user.usage, period_end: '2026-12-23T10:00:00Z', monthly_runs: 1000, used: 12, remaining: 988, ai_requests: { limit: 20, per: 'month', used_by_world: { 'prisoners-dilemma': 5 }, used_this_month: 5 } }
 	};
 	await page.route('**/api/session', (route) => route.fulfill({ json: { user: subscriber } }));
 	await open(page, '/profile', 'Profile');
 	const main = page.locator('#main');
 	await expect(main.locator('dl.rules')).toContainText('Subscriber');
 	await expect(main).toContainText('988 left · 12 of 1000 used');
-	await expect(main).toContainText('15 left · 5 of 20 used this month');
-	await expect(main).toContainText('Across all worlds · Resets on the 1st');
-	await expect(main).toContainText('Private worlds · Included');
+	await expect(main).toContainText('15 left · 5 of 20 used');
+	await expect(main).toContainText('Across all worlds · They come back on 23 December 2026');
 });

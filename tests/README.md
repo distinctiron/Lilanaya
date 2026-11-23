@@ -47,6 +47,7 @@ Anything after the mode goes to the tool behind it:
 - `safety/limits.rs`: every limit, with requests one at a time, arriving together, and on both sides of its time window.
 - `safety/privacy.rs`: private strategies and runs are invisible to everyone else; nobody's email address or description is handed out.
 - `safety/sessions.rs`: cookie attributes, forged cookies, links that work once and expire, the round trip through an outside provider.
+- `safety/payments.rs`: a message Stripe did not sign just now gives nothing; what a message claims is checked with Stripe; nobody gets what somebody else paid for; a pack cannot be spent twice.
 - `safety/requests.rs`: oversized, malformed and hostile requests get a plain refusal and break nothing.
 - UI tests tagged `@safety`: security headers on every answer, nothing loaded from elsewhere, markup shown as text, the rate limit on sign-in links, where a visitor can be redirected.
 
@@ -55,6 +56,7 @@ Anything after the mode goes to the tool behind it:
 `compose.test.yaml` starts the site as production runs it: the nginx image, the release build of the API, the API and the worker as two services, and Postgres (in memory, empty at every start). Two things stand in:
 
 - **Email**: Mailpit catches every message; the tests read sign-in links from it.
+- **Stripe**: `tests/ui/fake-stripe/server.mjs` is Stripe's API, its Checkout page and its customer portal, as plain pages with buttons ("Pay", "Pay, message arrives late", "Go back without paying"). It signs its messages to the site as Stripe does. No money moves.
 - **The AI**: `tests/ui/fake-ai/server.mjs` answers for the language model and for Jev, the screen. What it answers depends on words in the description; the list is at the top of that file. The tests cost nothing and never call a real model.
 
 The test stack gives a free account 3 runs a month, so a test can reach the limit.

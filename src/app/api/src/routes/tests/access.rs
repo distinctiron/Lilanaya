@@ -68,6 +68,15 @@ fn table(p: &str, q: &str, r: i64, s: i64, world: &Value) -> Vec<Row> {
         row(M::PATCH, "/api/me", "/api/me", Some(json!({ "display_name": "Renamed" })), SIGNED_IN),
         get("/api/me/entitlements", "/api/me/entitlements".into(), SIGNED_IN),
         get("/api/usage", "/api/usage".into(), SIGNED_IN),
+        get("/api/me/export", "/api/me/export".into(), SIGNED_IN),
+        // Payment. It is switched off in this table's server, so buying answers "not available" to anyone signed in;
+        // what each route does with payment on is in tests/billing.rs and tests/safety/payments.rs.
+        get("/api/billing", "/api/billing".into(), SIGNED_IN),
+        row(M::POST, "/api/billing/checkout", "/api/billing/checkout", Some(json!({ "item": "small", "agree": true })), [401, 503, 503]),
+        row(M::POST, "/api/billing/portal", "/api/billing/portal", Some(json!({})), [401, 503, 503]),
+        row(M::POST, "/api/billing/confirm", "/api/billing/confirm", Some(json!({ "session_id": "cs_test_1" })), [401, 503, 503]),
+        // Stripe's own door: a session is neither needed nor of any use.
+        row(M::POST, "/api/billing/webhook", "/api/billing/webhook", Some(json!({ "id": "evt_1", "type": "x" })), [503, 503, 503]),
         // Strategies: reading is open, a private one exists only for its owner, and only the owner changes one.
         get("/api/strategies", "/api/strategies".into(), OPEN),
         row(M::POST, "/api/strategies", "/api/strategies", Some(grudger(json!({}))), [401, 201, 201]),
@@ -97,6 +106,8 @@ fn table(p: &str, q: &str, r: i64, s: i64, world: &Value) -> Vec<Row> {
         row(M::DELETE, "/api/strategies/{id}", "/api/strategies/tit_for_tat", None, [401, 403, 403]),
         row(M::DELETE, "/api/strategies/{id}", format!("/api/strategies/{p}"), None, [401, 200, 404]),
         row(M::DELETE, "/api/strategies/{id}", format!("/api/strategies/{q}"), None, [401, 200, 403]),
+        // Deleting the account takes typing its own address: another user typing the owner's deletes nothing.
+        row(M::DELETE, "/api/me", "/api/me", Some(json!({ "email": "ada@example.com" })), [401, 200, 422]),
         row(M::POST, "/api/auth/sign-out", "/api/auth/sign-out", None, OPEN),
     ]
 }

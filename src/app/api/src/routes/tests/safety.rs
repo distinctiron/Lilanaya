@@ -7,10 +7,12 @@
 //! - `privacy`: what is private stays invisible, and nothing personal is handed out.
 //! - `sessions`: cookies, sign-in links and the round trip through an outside provider.
 //! - `requests`: hostile, malformed and oversized requests get a plain refusal.
+//! - `payments`: nothing is given that was not paid for, and nobody but Stripe can say what was paid.
 
 use super::*;
 
 mod limits;
+mod payments;
 mod privacy;
 mod requests;
 mod sandbox;

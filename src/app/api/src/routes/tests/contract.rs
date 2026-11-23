@@ -67,8 +67,9 @@ fn has_shape(what: &str, value: &Value, shape: Value) {
 
 fn usage_shape() -> Value {
     json!({
-        "period": "string", "monthly_runs": "number", "used": "number", "remaining": "number", "max_active_runs": "number",
+        "period": "string", "period_end": "string", "monthly_runs": "number", "used": "number", "remaining": "number", "max_active_runs": "number",
         "ai_requests": { "limit": "number", "per": "string", "used_by_world": "object", "used_this_month": "number" },
+        "packs": { "strategies_left": "number", "runs_left": "number" },
     })
 }
 
@@ -77,7 +78,7 @@ fn me_shape() -> Value {
         "id": "number", "email": "string", "display_name": "string", "roles": ["string"], "plan": "string",
         "entitlements": { "analytics_access": "bool", "quick_test_access": "bool", "private_worlds": "bool" },
         "usage": usage_shape(),
-        "features": { "compile": "bool" },
+        "features": { "compile": "bool", "billing": "bool" },
     })
 }
 
@@ -118,6 +119,27 @@ async fn the_account_pages_get_the_user_the_usage_and_the_plans() {
     // The pages tell the two kinds of allowance apart by this word.
     let (_, plans) = anon.get("/api/plans").await;
     assert_eq!((plans["free"]["ai_requests"]["per"].as_str(), plans["subscriber"]["ai_requests"]["per"].as_str()), (Some("world"), Some("month")));
+
+    // Payment: the plans page reads the prices, the profile what was paid for.
+    let (shop, stripe) = app_with_fake_stripe(None, Config::for_tests()).await;
+    let price = json!({ "amount": "number", "currency": "string" });
+    has_shape("GET /api/plans (billing)", &shop.anonymous().get("/api/plans").await.1["billing"], json!({
+        "subscription": { "amount": "number", "currency": "string", "interval": "string" },
+        "packs": [{ "id": "string", "strategies": "number", "runs": "number", "amount": price["amount"], "currency": price["currency"] }],
+        "tax_added": "bool",
+    }));
+    has_shape("POST /api/billing/checkout", &shop.post("/api/billing/checkout", json!({ "item": "small", "agree": true })).await.1, json!({ "url": "string" }));
+    shop.buy_pack(&stripe, "small", 1).await;
+    shop.subscribe(&stripe, "sub_1", unix_now() - 60, unix_now() + 30 * DAY).await;
+    has_shape("GET /api/billing", &shop.get("/api/billing").await.1, json!({
+        "enabled": "bool", "plan": "string", "can_manage": "bool",
+        "subscription": { "status": "string", "paid": "bool", "period_end": "string", "cancel_at_period_end": "bool" },
+        "packs": { "strategies_left": "number", "runs_left": "number" },
+        "purchases": [{ "pack": "string", "strategies": "number", "runs": "number", "amount": "number", "currency": "string", "created_at": "string", "refunded": "bool" }],
+    }));
+    has_shape("POST /api/billing/portal", &shop.post("/api/billing/portal", json!({})).await.1, json!({ "url": "string" }));
+    has_shape("GET /api/me/export", &shop.get("/api/me/export").await.1, json!({ "account": { "email": "string" }, "strategies": "array", "runs": "array", "purchases": "array" }));
+    shop.close().await;
 
     // Signing in: the page shows how long the link is good for, and takes the user from the confirmation.
     let (_, sent) = anon.post("/api/auth/email", json!({ "email": "grace@example.com" })).await;

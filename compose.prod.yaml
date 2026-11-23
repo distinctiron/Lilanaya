@@ -66,6 +66,14 @@ services:
       COMPILES_PER_HOUR: ${COMPILES_PER_HOUR:-}
       COMPILES_PER_DAY: ${COMPILES_PER_DAY:-}
       COMPILE_TOKENS_PER_DAY: ${COMPILE_TOKENS_PER_DAY:-}
+      # Payment through Stripe (src/app/api/src/billing.rs). Leave the key unset to switch payment off.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUBSCRIPTION_PRICE: ${STRIPE_SUBSCRIPTION_PRICE:-}
+      STRIPE_PACK_SMALL_PRICE: ${STRIPE_PACK_SMALL_PRICE:-}
+      STRIPE_PACK_MEDIUM_PRICE: ${STRIPE_PACK_MEDIUM_PRICE:-}
+      STRIPE_PACK_LARGE_PRICE: ${STRIPE_PACK_LARGE_PRICE:-}
+      STRIPE_TAX: ${STRIPE_TAX:-}
     depends_on:
       db:
         condition: service_healthy

@@ -135,6 +135,8 @@ async fn the_plans_are_public() {
         json!({
             "free": { "ai_requests": { "limit": 3, "per": "world" }, "monthly_runs": 100, "max_active_runs": 2 },
             "subscriber": { "ai_requests": { "limit": 20, "per": "month" }, "monthly_runs": 1000, "max_active_runs": 2 },
+            // Payment is off here: nothing is for sale, so no prices.
+            "billing": null,
         })
     );
     app.close().await;

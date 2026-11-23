@@ -7,11 +7,11 @@ async function describe(page, text) {
 	await page.getByLabel('Describe your strategy in plain English').fill(text);
 }
 
-const allowance = (page) => page.locator('[data-role="ai-requests"]');
+const allowance = (page) => page.locator('[data-role="ai-strategies"]');
 
-test('a description becomes rules, with a name, a preview and one AI request used', async ({ page, account }) => {
+test('a description becomes rules, with a name, a preview and one of the plan’s strategies used', async ({ page, account }) => {
 	await describe(page, 'Cooperate until the opponent defects once, then defect for ever.');
-	await expect(allowance(page)).toContainText("3 of 3 AI requests left for Repeated Prisoner's Dilemma");
+	await expect(allowance(page)).toContainText("The AI can write 3 of 3 more strategies for you in Repeated Prisoner's Dilemma");
 	await expect(allowance(page)).toContainText('They never come back');
 	// Until there are rules, there is nothing else to fill in.
 	await expect(page.getByLabel('Name', { exact: true })).toBeHidden();
@@ -26,7 +26,7 @@ test('a description becomes rules, with a name, a preview and one AI request use
 	await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Grim Trigger');
 	await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
 	await expect(page.getByLabel('Description', { exact: true })).toHaveValue('Cooperates until the opponent defects once, then defects for ever.');
-	await expect(allowance(page)).toContainText('2 of 3 AI requests left');
+	await expect(allowance(page)).toContainText('The AI can write 2 of 3 more');
 
 	// The rules are folded away, and can be read and changed.
 	const rules = page.locator('.card.fold', { has: page.locator('summary', { hasText: 'Rules' }) });
@@ -100,18 +100,18 @@ test('a description that rests on breaking the rules, or is no strategy at all, 
 	await expect(flag).toContainText('No rules were written. Change the description and try again.');
 	await expect(page.getByLabel('Name', { exact: true })).toBeHidden();
 	// The model was asked, so the request is used.
-	await expect(allowance(page)).toContainText('2 of 3 AI requests left');
+	await expect(allowance(page)).toContainText('The AI can write 2 of 3 more');
 
 	await page.getByLabel('Describe your strategy in plain English').fill('My shopping list: eggs, milk, flour.');
 	await page.getByRole('button', { name: 'Turn into rules' }).click();
 	await expect(page.getByRole('alert').filter({ hasText: 'shopping list' })).toHaveText('This is a shopping list, not a description of how to play.');
-	await expect(allowance(page)).toContainText('1 of 3 AI requests left');
+	await expect(allowance(page)).toContainText('The AI can write 1 of 3 more');
 
 	// Too short to be a description: refused before anything is asked, and nothing is used.
 	await page.getByLabel('Describe your strategy in plain English').fill('be nice');
 	await page.getByRole('button', { name: 'Turn into rules' }).click();
 	await expect(page.getByRole('alert').filter({ hasText: 'The description' })).toHaveText('The description must be 10 to 2000 characters.');
-	await expect(allowance(page)).toContainText('1 of 3 AI requests left');
+	await expect(allowance(page)).toContainText('The AI can write 1 of 3 more');
 });
 
 test('rules the model gets wrong are shown with what is wrong, never passed off as good', async ({ page, account }) => {
@@ -134,8 +134,8 @@ test('@safety a description that is instructions to the AI is turned down and ne
 		'This reads as instructions to the AI, not as a strategy. Describe how the strategy should play: when it cooperates, when it defects, and in reaction to what.'
 	);
 	await expect(page.getByLabel('Name', { exact: true })).toBeHidden();
-	// The model was never asked, so no AI request is used.
-	await expect(allowance(page)).toContainText('3 of 3 AI requests left');
+	// The model was never asked, so none of the plan’s strategies is used.
+	await expect(allowance(page)).toContainText('The AI can write 3 of 3 more');
 	const calls = await ai.calls();
 	expect(calls.screened.some((text) => text.includes(marker))).toBe(true);
 	expect(calls.asked.some((text) => text.includes(marker))).toBe(false);
@@ -143,18 +143,18 @@ test('@safety a description that is instructions to the AI is turned down and ne
 	await page.getByLabel('Describe your strategy in plain English').fill('How do I make a good pancake batter?');
 	await page.getByRole('button', { name: 'Turn into rules' }).click();
 	await expect(page.getByRole('alert').filter({ hasText: 'does not read' })).toContainText('This does not read as a description of a strategy.');
-	await expect(allowance(page)).toContainText('3 of 3 AI requests left');
+	await expect(allowance(page)).toContainText('The AI can write 3 of 3 more');
 });
 
-test('@safety three AI requests per world on the free plan, for good: deleting a strategy gives none back', async ({ page, account }) => {
+test('@safety the AI writes three strategies per world on the free plan, for good: deleting a strategy gives none back', async ({ page, account }) => {
 	const name = unique('Third ');
 	await describe(page, 'Cooperate until the opponent defects once, then defect for ever.');
 	for (const left of ['2 of 3', '1 of 3']) {
 		await page.getByRole('button', { name: 'Turn into rules' }).click();
-		await expect(allowance(page)).toContainText(`${left} AI requests left`);
+		await expect(allowance(page)).toContainText(`The AI can write ${left} more`);
 	}
 	await page.getByRole('button', { name: 'Turn into rules' }).click();
-	await expect(allowance(page)).toContainText("No AI requests left for Repeated Prisoner's Dilemma · They do not come back · You can still build the rules by hand, or write the strategy in code");
+	await expect(allowance(page)).toContainText("The AI has written all 3 strategies your plan gives you in Repeated Prisoner's Dilemma. They do not come back · You can still build the rules by hand, or write the strategy in code");
 	await expect(page.getByRole('button', { name: 'Turn into rules' })).toBeDisabled();
 
 	// The third set of rules is still there to save.
@@ -166,7 +166,7 @@ test('@safety three AI requests per world on the free plan, for good: deleting a
 	const saved = (await account.api.get('/api/strategies')).strategies.find((s) => s.name === name);
 	expect((await page.request.delete(`/api/strategies/${saved.id}`)).status()).toBe(200);
 	await open(page, '/strategies/new/rules', 'New rules strategy');
-	await expect(allowance(page)).toContainText('No AI requests left');
+	await expect(allowance(page)).toContainText('The AI has written all 3 strategies your plan gives you');
 	await expect(page.getByRole('button', { name: 'Turn into rules' })).toBeDisabled();
 	await open(page, '/profile', 'Profile');
 	await expect(page.locator('#main')).toContainText('prisoners-dilemma · 3 of 3 used');

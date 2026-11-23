@@ -139,6 +139,41 @@ pub async fn update_me(State(state): Shared, user: User, body: Result<Bytes, Byt
     Ok(Json(me_json(&state, &user).await?))
 }
 
+/// Everything we hold about the signed-in user, as a file to keep.
+pub async fn export(State(state): Shared, user: User) -> Result<Response, ApiError> {
+    let data = state.store.export_user(user.id).await?;
+    let headers = [(header::CONTENT_TYPE, "application/json"), (header::CONTENT_DISPOSITION, "attachment; filename=\"lilanaya-my-data.json\""), (header::CACHE_CONTROL, "no-store")];
+    Ok((headers, serde_json::to_string_pretty(&data).unwrap_or_default()).into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteBody {
+    /// The account's own address, typed out: deleting cannot happen by a slip of the hand.
+    email: String,
+}
+
+/// Deletes the signed-in user's account for good. A running subscription is ended at Stripe first,
+/// so nobody is charged for an account that is gone; if that cannot be done, nothing is deleted.
+pub async fn delete_me(State(state): Shared, user: User, body: Result<Bytes, BytesRejection>) -> Result<Response, ApiError> {
+    let req: DeleteBody = parse_json(body)?;
+    if normalise_email(&req.email).as_deref() != Some(user.email.as_str()) {
+        return Err(ApiError::invalid("Type your own email address to delete the account", vec![lilanaya_engine::Issue::new("email", "is not this account's address")]));
+    }
+    if let Some(sub) = state.store.subscription(user.id).await?.filter(|s| !matches!(s.status.as_str(), "canceled" | "incomplete_expired")) {
+        let Some(billing) = &state.billing else {
+            return Err(ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "payment_unavailable", "Your subscription could not be ended, so the account was not deleted. Try again later."));
+        };
+        if let Err(e) = billing.cancel_subscription(&sub.stripe_id).await {
+            eprintln!("billing: could not end subscription of user {} before deleting the account: {e}", user.id);
+            return Err(ApiError::new(StatusCode::BAD_GATEWAY, "payment_unavailable", "Your subscription could not be ended, so the account was not deleted. Try again in a moment."));
+        }
+    }
+    state.store.delete_user(user.id).await?;
+    let cookie = session_cookie(None, state.config.secure_cookies());
+    Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "deleted": true }))).into_response())
+}
+
 pub async fn entitlements(user: User) -> ApiResult {
     Ok(Json(entitlements_json(&user)))
 }
@@ -157,18 +192,28 @@ pub async fn plans(State(state): Shared) -> ApiResult {
         };
         json!({ "ai_requests": { "limit": limit, "per": per }, "monthly_runs": config.monthly_runs(name), "max_active_runs": config.max_active_runs })
     };
-    Ok(Json(json!({ "free": plan("free"), "subscriber": plan("subscriber") })))
+    // What is for sale and at what price, as it stands at Stripe. Null when payment is off or Stripe cannot be read.
+    let (prices, tax) = match &state.billing {
+        Some(billing) => (billing.prices().await, billing.tax()),
+        None => (None, false),
+    };
+    Ok(Json(json!({
+        "free": plan("free"), "subscriber": plan("subscriber"),
+        "billing": prices.map(|p| json!({ "subscription": p["subscription"], "packs": p["packs"], "tax_added": tax })),
+    })))
 }
 
-/// What the plan unlocks. No billing yet: the plan is set by hand in the database.
+/// What the plan unlocks.
 fn entitlements_json(user: &User) -> Value {
     let subscriber = user.plan == "subscriber";
     json!({ "plan": user.plan, "analytics_access": subscriber, "quick_test_access": subscriber, "private_worlds": subscriber })
 }
 
-/// Runs started this calendar month against the plan's allowance, and how many may wait or run at once.
+/// Runs started in the current period against the plan's allowance, and how many may wait or run at once.
+/// The period is the paid month for a paying subscriber and the calendar month for everyone else.
 async fn usage_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
-    let (period, used) = state.store.runs_this_month(user.id).await?;
+    let usage = state.store.usage(user.id).await?;
+    let (period, used) = (&usage.period, usage.runs_used);
     let monthly = state.config.monthly_runs(&user.plan);
     // AI requests: `per` is "world" (that many in each world, for good) or "month" (that many a month, across worlds).
     let (by_world, this_month) = state.store.ai_requests_used(user.id).await?;
@@ -177,8 +222,11 @@ async fn usage_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
         Allowance::PerMonth(n) => (n, "month"),
     };
     Ok(json!({
-        "period": period, "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": true, "max_active_runs": state.config.max_active_runs,
+        "period": period, "period_start": usage.period_start, "period_end": usage.period_end,
+        "monthly_runs": monthly, "used": used, "remaining": (monthly - used).max(0), "enforced": true, "max_active_runs": state.config.max_active_runs,
         "ai_requests": { "limit": limit, "per": per, "used_by_world": by_world, "used_this_month": this_month },
+        // What is left of the packs the user bought: used when the plan's own are used up.
+        "packs": { "strategies_left": usage.pack_strategies_left, "runs_left": usage.pack_runs_left },
     }))
 }
 
@@ -191,7 +239,7 @@ async fn me_json(state: &AppState, user: &User) -> Result<Value, ApiError> {
         "plan": user.plan,
         "entitlements": entitlements_json(user),
         "usage": usage_json(state, user).await?,
-        "features": { "compile": state.llm.is_some() },
+        "features": { "compile": state.llm.is_some(), "billing": state.billing.is_some() },
     }))
 }
 

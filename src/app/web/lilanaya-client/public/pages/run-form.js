@@ -1,6 +1,6 @@
 import { ApiError, getJson, postJson } from '../api.js';
 import { avatar } from '../components/avatar.js';
-import { button } from '../components/button.js';
+import { button, linkButton } from '../components/button.js';
 import { screen, screenGroup } from '../components/screen.js';
 import { sectionHeading } from '../components/section-heading.js';
 import { h, prefersReducedMotion } from '../dom.js';
@@ -151,6 +151,8 @@ export async function runFormPage({ query, navigate }) {
 					submit.textContent = 'Run simulation';
 					if (!(error instanceof ApiError)) console.error(error);
 					showError(error instanceof ApiError ? error.message : 'The run could not be started.', error.details ?? []);
+					// Out of runs: say where more can be had.
+					if (error instanceof ApiError && error.code === 'run_limit_reached') errors.append(h('p', null, linkButton('See plans and packs', '/plans')));
 				}
 			}
 		},
