@@ -10,11 +10,12 @@ async fn runs_are_limited_per_month_and_in_how_many_wait_at_once() {
     assert_eq!((usage["enforced"].clone(), usage["max_active_runs"].clone()), (json!(true), json!(1)));
 
     // A strategy that thinks for a moment before every decision (well inside its step budget)
-    // keeps the worker busy for seconds: long enough to ask for a second run.
+    // keeps the worker busy: long enough to ask for a second run, and short enough to finish well inside
+    // the time a run is given, also on a slow machine that is running every other test at once.
     let thinker = json!({ "name": "Thinker", "mode": "code", "visibility": "public", "source": "function decide() { let n = 0; for (let i = 0; i < 30000; i++) n += i; return 'C'; }" });
     let (status, saved) = app.post("/api/strategies", thinker).await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
-    let (status, first) = app.post("/api/runs", pd(json!({ "actors": [saved["id"], "always_defect"], "iterations": 2000 }))).await;
+    let (status, first) = app.post("/api/runs", pd(json!({ "actors": [saved["id"], "always_defect"], "iterations": 500 }))).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{first}");
     let (status, body) = app.post("/api/runs", pd(json!({ "iterations": 5 }))).await;
     assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("too_many_runs")), "{body}");
@@ -23,12 +24,13 @@ async fn runs_are_limited_per_month_and_in_how_many_wait_at_once() {
     assert_eq!(bob.run(pd(json!({ "iterations": 5 }))).await["status"], "completed");
 
     for _ in 0..6000 {
-        if app.get("/api/runs/1").await.1["status"] == "completed" {
+        if matches!(app.get("/api/runs/1").await.1["status"].as_str(), Some("completed") | Some("failed")) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(app.get("/api/runs/1").await.1["status"], "completed");
+    let (_, first) = app.get("/api/runs/1").await;
+    assert_eq!(first["status"], "completed", "{first}");
     assert_eq!(app.run(pd(json!({ "iterations": 5 }))).await["status"], "completed", "a second run, once the first is done");
     let (status, body) = app.post("/api/runs", pd(json!({ "iterations": 5 }))).await;
     assert_eq!((status, body["error"]["code"].as_str()), (StatusCode::TOO_MANY_REQUESTS, Some("run_limit_reached")), "{body}");
