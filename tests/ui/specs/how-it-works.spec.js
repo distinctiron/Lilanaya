@@ -1,7 +1,7 @@
 // How it works: three narrated films, each a row of chapters.
 import { expect, open, test } from '../fixtures.js';
 
-const FILMS = ['Film: what Lilanaya is, in four chapters', 'Film: how Lilanaya works, in four steps', 'Film: the Prisoner’s Dilemma, in four chapters'];
+const FILMS = ['Animation: what Lilanaya is, in four chapters', 'Animation: how Lilanaya works, in four steps', 'Animation: the Prisoner’s Dilemma, in four chapters'];
 
 test('with motion reduced, each film is a set of finished pictures to step through', async ({ page }) => {
 	await open(page, '/how-it-works', 'How it works');

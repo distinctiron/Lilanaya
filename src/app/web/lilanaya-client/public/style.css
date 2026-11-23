@@ -2331,6 +2331,21 @@ html:has(.screens) {
 	gap: 12px;
 }
 
+/* The line under a section's heading is the first thing to go where the film needs the room:
+   a low window, or a tablet-wide one where the chapters sit under the film. */
+@media (max-height: 720px), (min-width: 721px) and (max-width: 900px) {
+	.how-intro p {
+		display: none;
+	}
+}
+
+/* On a short phone the list of runs needs the whole window. */
+@media (max-width: 720px) and (max-height: 720px) {
+	.runs-intro {
+		display: none;
+	}
+}
+
 .talk {
 	display: flex;
 	align-items: flex-start;

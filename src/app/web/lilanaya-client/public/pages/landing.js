@@ -358,9 +358,9 @@ function steps() {
 	const strip = (moves) => h('span', { class: 'step-strip' }, [...moves].map((move) => h('span', { class: 'chip', 'data-move': move })));
 	const step = (number, picture, title, text) => h('li', { class: 'step stack-sm' }, [h('div', { class: 'step-pic', 'aria-hidden': 'true' }, picture), h('h3', { class: 'px' }, `${number} ${title}`), h('p', null, text)]);
 	return h('ol', { class: 'steps' }, [
-		step(1, h('span', { class: 'px' }, 'Prisoner’s Dilemma'), 'Pick a world', 'A world is a game with fixed rules and points.'),
-		step(2, avatar('challenger', { size: 48 }), 'Write a strategy', 'In plain English, as rules, or as code. It gets its own avatar.'),
-		step(3, strip('CCDCCCDC'), 'Run and improve', 'See every round, find where it lost points, change it, and run again.')
+		step(1, h('span', { class: 'px' }, 'Prisoner’s Dilemma'), 'Pick a world', 'A world is a game with fixed rules. The first is the Prisoner’s Dilemma.'),
+		step(2, avatar('challenger', { size: 48 }), 'Write a strategy', 'In plain English, as rules, or as code. Each one gets its own avatar.'),
+		step(3, strip('CCDCCCDC'), 'Run and improve', 'Run it against other strategies. See every round, change it, and run again.')
 	]);
 }
 
@@ -384,21 +384,21 @@ export async function landingPage({ onLeave }) {
 			h('section', { class: 'landing-hero' }, [
 				avatar(OPPONENT, { size: 64 }),
 				h('h1', { class: 'hero-title', tabindex: '-1' }, ['Write a strategy.', h('br'), 'Watch it play.']),
-				h('p', { class: 'lead' }, 'Lilanaya is an arena for game theory. Start by playing one game yourself. It takes a minute.'),
+				h('p', { class: 'lead' }, 'Lilanaya is an arena for game theory. You write a strategy, and it plays against other strategies. Start by playing one game yourself. It takes a minute.'),
 				h('p', null, button('Play a round', { primary: true, class: 'btn btn-primary btn-big', onclick: () => goTo(playHeading) }))
 			]),
 
 			h('section', { id: 'play', class: 'landing-section landing-screen stack-md' }, [playHeading, playByHand(() => goTo(arenaHeading))]),
 
 			h('section', { id: 'strategies', class: 'landing-section landing-screen stack-md' }, [
-				h('div', { class: 'stack' }, [arenaHeading, h('p', null, 'Four well-known strategies are built in. Pick two and watch twenty rounds.')]),
+				h('div', { class: 'stack' }, [arenaHeading, h('p', null, 'A strategy is a plan that plays for you. Four well-known ones are built in. Pick two and watch twenty rounds.')]),
 				lab.node
 			]),
 
 			h('section', { id: 'ranking', class: 'landing-section landing-screen stack-md' }, [
 				h('div', { class: 'stack' }, [
 					rankHeading,
-					h('p', { class: 'prose' }, `One match is not enough. Every strategy plays every other, and the points add up. In this small group, ${ranking.winner} comes out on top.`)
+					h('p', { class: 'prose' }, `One match is not enough. Every strategy plays every other one. The highest average score wins. In this small group, ${ranking.winner} comes out on top.`)
 				]),
 				ranking.node,
 				h('p', null, button('Your turn', { onclick: () => goTo(turnHeading) }))
@@ -410,7 +410,7 @@ export async function landingPage({ onLeave }) {
 				h('div', { class: 'landing-close stack' }, [
 					h('p', null, linkButton('Create your first strategy', start, { primary: true, class: 'btn btn-primary btn-big' })),
 					user ? null : h('p', { class: 'meta' }, 'Sign up with your email. No password needed.'),
-					h('p', { class: 'meta' }, ['Want the full story first? ', h('a', { href: '/how-it-works' }, 'How it works'), ' has three short films and a closer look at the Prisoner’s Dilemma.'])
+					h('p', { class: 'meta' }, ['Want the full story first? ', h('a', { href: '/how-it-works' }, 'How it works'), ' has three short animations and a closer look at the Prisoner’s Dilemma.'])
 				])
 			])
 		])

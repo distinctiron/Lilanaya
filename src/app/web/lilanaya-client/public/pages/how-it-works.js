@@ -598,10 +598,10 @@ export async function howItWorksPage({ onLeave, query }) {
 	const user = await getUser();
 	const table = payoffTable();
 	const films = [
-		film({ label: 'Film: what Lilanaya is, in four chapters', chapters: WHAT_IT_IS }),
-		film({ label: 'Film: how Lilanaya works, in four steps', chapters: HOW_IT_WORKS }),
+		film({ label: 'Animation: what Lilanaya is, in four chapters', chapters: WHAT_IT_IS }),
+		film({ label: 'Animation: how Lilanaya works, in four steps', chapters: HOW_IT_WORKS }),
 		film({
-			label: 'Film: the Prisoner’s Dilemma, in four chapters',
+			label: 'Animation: the Prisoner’s Dilemma, in four chapters',
 			chapters: dilemmaChapters(table.cells),
 			aside: h('div', { class: 'stack' }, [h('h3', { class: 'section-heading' }, 'The points'), table.node])
 		})
@@ -622,23 +622,31 @@ export async function howItWorksPage({ onLeave, query }) {
 			h('section', { id: 'what-it-is', class: 'how-screen how-top stack-md' }, [
 				h('div', { class: 'stack' }, [
 					sectionHeading('How it works', { level: 1 }),
-					h('p', null, 'Three short films. Each one starts when you scroll to it. First: what Lilanaya is.')
+					h('p', null, 'Three short animations. Each one starts when you scroll to it. First: what Lilanaya is.')
 				]),
 				films[0].node,
 				legend()
 			]),
 
-			h('section', { id: 'what-you-do', class: 'landing-section how-screen stack-md' }, [sectionHeading('What you do'), films[1].node, legend()]),
+			h('section', { id: 'what-you-do', class: 'landing-section how-screen stack-md' }, [
+				h('div', { class: 'stack how-intro' }, [sectionHeading('What you do'), h('p', null, 'Four steps, from picking a world to improving your strategy.')]),
+				films[1].node,
+				legend()
+			]),
 
-			h('section', { id: 'prisoners-dilemma', class: 'landing-section how-screen stack-md' }, [sectionHeading('The first world: Prisoner’s Dilemma'), films[2].node, legend()]),
+			h('section', { id: 'prisoners-dilemma', class: 'landing-section how-screen stack-md' }, [
+				h('div', { class: 'stack how-intro' }, [sectionHeading('The first world: Prisoner’s Dilemma'), h('p', null, 'The rules of the first game, and why it is a dilemma.')]),
+				films[2].node,
+				legend()
+			]),
 
 			h('section', { id: 'why', class: 'landing-section how-screen stack-lg' }, [
 				sectionHeading('Why Lilanaya'),
 				h('ul', { class: 'figures two reasons' }, [
-					h('li', { class: 'stack-sm' }, [h('strong', null, 'No coding needed.'), 'Plain English is enough.']),
+					h('li', { class: 'stack-sm' }, [h('strong', null, 'No coding needed.'), 'Plain English is enough. Rules and code are optional.']),
 					h('li', { class: 'stack-sm' }, [h('strong', null, 'Nothing is hidden.'), 'Every result can be traced back to the moves that caused it.']),
-					h('li', { class: 'stack-sm' }, [h('strong', null, 'Fair and repeatable.'), 'The same run always gives the same result.']),
-					h('li', { class: 'stack-sm' }, [h('strong', null, 'Known opponents.'), 'Test yourself against classics like Tit for Tat and Always Defect.'])
+					h('li', { class: 'stack-sm' }, [h('strong', null, 'Fair and repeatable.'), 'The same seed always gives the same result.']),
+					h('li', { class: 'stack-sm' }, [h('strong', null, 'Known opponents.'), 'Play classics like Tit for Tat and Always Defect, and strategies from other players.'])
 				]),
 				h('div', { class: 'landing-close stack-md' }, [
 				h('h2', { class: 'section-heading' }, 'Think your strategy can win?'),

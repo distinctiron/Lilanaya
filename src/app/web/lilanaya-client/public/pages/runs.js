@@ -11,7 +11,7 @@ export async function runsPage() {
 		? // As many runs as fit the window; the rest are a page away.
 			pager({
 				rowHeight: 50,
-				reserve: 400,
+				reserve: 450,
 				rows: runs.map((r) =>
 					h('tr', null, [
 						h('th', { scope: 'row' }, h('a', { href: `/runs/${r.id}` }, `Run ${r.id}`)),
@@ -31,11 +31,12 @@ export async function runsPage() {
 						])
 					])
 			})
-		: h('p', null, 'No runs yet.');
+		: h('p', null, 'No runs yet. Start one to see which strategy wins.');
 	return {
 		title: 'Runs',
 		node: h('section', { class: 'stack' }, [
 			h('div', { class: 'row spread' }, [sectionHeading('Runs', { level: 1 }), linkButton('New run', '/runs/new', { primary: true })]),
+			h('p', { class: 'prose runs-intro' }, 'A run plays strategies against each other. Open one to see the ranking and every match.'),
 			h('p', { class: 'meta' }, 'Newest first'),
 			body
 		])

@@ -76,7 +76,7 @@ export async function strategiesPage(ctx) {
 	];
 	const intro = h('div', { class: 'stack' }, [
 		sectionHeading('Strategies', { level: 1 }),
-		h('p', { class: 'prose' }, 'A strategy decides what to play each round from what has happened so far. Most are rules: a few states, one decision per state, and conditions for moving between them. A strategy can also be written as code. Open a strategy to see how it works.'),
+		h('p', { class: 'prose' }, 'A strategy decides what to play each round from what has happened so far. Most are rules: a few states, a move for each state, and conditions for switching between them. A strategy can also be code. Open one to see how it works. Any of them can play in a run.'),
 		h('p', null, user ? linkButton('New strategy', '/strategies/new', { primary: true }) : linkButton('Sign up to make your own', signUpUrl('/strategies/new'))),
 		user && !mine.length ? h('p', { class: 'meta' }, 'You have no strategies yet') : null
 	]);
